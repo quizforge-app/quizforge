@@ -6,7 +6,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 // capacitor:// origin. Set VITE_TARGET=capacitor for the APK build.
 const isCapacitor = process.env.VITE_TARGET === 'capacitor'
 
+// Base path. GitHub Pages project sites are served under /<repo>/, so set
+// VITE_BASE=/quizforge/ when building for Pages. Local dev and the APK keep '/'.
+const base = process.env.VITE_BASE || '/'
+
 export default defineConfig({
+  base,
   plugins: [
     !isCapacitor && VitePWA({
       registerType: 'autoUpdate',
