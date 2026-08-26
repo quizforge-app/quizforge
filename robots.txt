@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://jazzfer-2003.github.io/quizforge/sitemap.xml
