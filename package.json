@@ -1,5 +1,5 @@
 {
-  "name": "quizforge",
+  "name": "quizard",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,11 +8,14 @@
     "dev": "vite --host",
     "build": "vite build",
     "test": "vitest run",
-    "build:cap": "cross-env VITE_TARGET=capacitor vite build",
+    "typecheck": "tsc --noEmit",
+    "build:cap": "cross-env VITE_TARGET=capacitor VITE_API_BASE=https://quizard-67e6a203.netlify.app VITE_SHARE_BASE_URL=https://quizard-67e6a203.netlify.app vite build",
     "preview": "vite preview --host"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/local-notifications": "^7.0.0",
     "idb": "^8.0.3",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.1",
@@ -21,8 +24,8 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.8",
-    "@capacitor/core": "^8.5.0",
     "cross-env": "^10.1.0",
+    "fake-indexeddb": "^6.2.5",
     "pdf-lib": "^1.17.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",

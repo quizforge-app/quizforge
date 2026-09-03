@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://quizforge-app.github.io/quizforge/sitemap.xml
+Sitemap: https://quizard-app.github.io/quizard/sitemap.xml

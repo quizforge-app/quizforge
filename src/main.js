@@ -3,19 +3,6 @@ import './styles/components.css'
 import './styles/screens.css'
 
 import * as library from './ui/screens/library.js'
-import * as history from './ui/screens/history.js'
-import * as importScreen from './ui/screens/import.js'
-import * as setup from './ui/screens/setup.js'
-import * as quiz from './ui/screens/quiz.js'
-import * as results from './ui/screens/results.js'
-import * as settingsScreen from './ui/screens/settings.js'
-import * as onboarding from './ui/screens/onboarding.js'
-import * as docDetail from './ui/screens/docdetail.js'
-import * as reviewerScreen from './ui/screens/reviewer.js'
-import * as accountsScreen from './ui/screens/accounts.js'
-import * as welcomeScreen from './ui/screens/welcome.js'
-import * as flashcardsScreen from './ui/screens/flashcards.js'
-import * as sharedScreen from './ui/screens/shared.js'
 import { saveAttempt, loadSettings, saveSettings, ensureDefaultAccount, listAccounts, setActiveAccount, getAccount, accountHasData } from './lib/storage.js'
 import { icon } from './ui/icons.js'
 import { initTooltips } from './ui/tooltip.js'
@@ -24,11 +11,53 @@ import { initTooltips } from './ui/tooltip.js'
 // assets locally (offline) and the SW throws on the capacitor:// origin, so
 // skip it when building for Android (VITE_TARGET=capacitor).
 if (import.meta.env.VITE_TARGET !== 'capacitor') {
-  import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true }))
+  import('virtual:pwa-register').then(({ registerSW }) => {
+    const updateSW = registerSW({
+      onNeedRefresh() {
+        toast('New version available — tap to update', false, () => updateSW(true))
+      },
+      onOfflineReady() {
+        toast('App ready for offline use')
+      },
+      onRegistrationError(err) {
+        console.error('SW registration error:', err)
+      }
+    })
+  })
 }
 initTooltips()
 
-const SCREENS = { library, history, import: importScreen, setup, quiz, results, settings: settingsScreen, onboarding, docdetail: docDetail, reviewer: reviewerScreen, accounts: accountsScreen, welcome: welcomeScreen, flashcards: flashcardsScreen, shared: sharedScreen }
+// ── Code-split screen registry ──
+// `library` is eagerly imported (first screen); all others lazy-load on demand.
+const SCREEN_IMPORTS = {
+  library: () => Promise.resolve(library),
+  history: () => import('./ui/screens/history.js'),
+  import: () => import('./ui/screens/import.js'),
+  setup: () => import('./ui/screens/setup.js'),
+  quiz: () => import('./ui/screens/quiz.js'),
+  results: () => import('./ui/screens/results.js'),
+  settings: () => import('./ui/screens/settings.js'),
+  onboarding: () => import('./ui/screens/onboarding.js'),
+  docdetail: () => import('./ui/screens/docdetail.js'),
+  reviewer: () => import('./ui/screens/reviewer.js'),
+  accounts: () => import('./ui/screens/accounts.js'),
+  welcome: () => import('./ui/screens/welcome.js'),
+  flashcards: () => import('./ui/screens/flashcards.js'),
+  shared: () => import('./ui/screens/shared.js'),
+  tutorial: () => import('./ui/screens/tutorial.js')
+}
+
+// Cache loaded modules so dynamic import() only fires once per screen.
+const screenCache = { library }
+
+async function loadScreen(name) {
+  if (screenCache[name]) return screenCache[name]
+  const loader = SCREEN_IMPORTS[name]
+  if (!loader) return null
+  const mod = await loader()
+  screenCache[name] = mod
+  return mod
+}
 const NAV_SCREENS = ['library', 'history', 'settings']
 
 const state = {
@@ -47,7 +76,7 @@ const settings = loadSettings()
 state.theme = settings.theme || 'dark'
 
 function resumeKeyFor(accountId) {
-  return `quizforge-active-quiz-${accountId || 'default'}`
+  return `quizard-active-quiz-${accountId || 'default'}`
 }
 
 function detectResumeBanner(accountId) {
@@ -59,10 +88,11 @@ function detectResumeBanner(accountId) {
         index: saved.index || 0,
         total: saved.questions.length
       }
-      return
+      return true
     }
   } catch { /* no saved session */ }
   state.resumeBanner = null
+  return false
 }
 
 function defaultConfig() {
@@ -94,10 +124,11 @@ function setTheme(theme) {
   saveSettings({ theme })
   Object.assign(settings, loadSettings())
   applyTheme(theme)
-  renderScreen(state.screen)
+  // Theme is applied purely via CSS variables on <html>, so no screen rebuild
+  // is needed — re-rendering the whole view here caused needless jank.
 }
 
-function toast(msg, isError = false) {
+function toast(msg, isError = false, onClick = null) {
   let el = document.querySelector('.toast')
   if (!el) {
     el = document.createElement('div')
@@ -106,9 +137,11 @@ function toast(msg, isError = false) {
   }
   el.textContent = msg
   el.classList.toggle('error', isError)
+  el.style.cursor = onClick ? 'pointer' : ''
+  el.onclick = onClick || null
   requestAnimationFrame(() => el.classList.add('show'))
   clearTimeout(el._t)
-  el._t = setTimeout(() => el.classList.remove('show'), 2600)
+  el._t = setTimeout(() => el.classList.remove('show'), onClick ? 8000 : 2600)
 }
 
 function getConfig(docId) {
@@ -120,7 +153,7 @@ function saveConfig(docId, cfg) {
   const s = loadSettings()
   s.configs = s.configs || {}
   s.configs[docId] = cfg
-  localStorage.setItem('quizforge-settings', JSON.stringify(s))
+  localStorage.setItem('quizard-settings', JSON.stringify(s))
   settings.configs = s.configs
 }
 
@@ -136,6 +169,11 @@ const ctx = {
   getConfig,
   saveConfig,
   saveAttemptRecord,
+  /** Apply stagger animation delay to child elements. */
+  stagger(parent, selector = '.stagger') {
+    const items = parent.querySelectorAll(selector)
+    items.forEach((el, i) => el.style.setProperty('--i', i))
+  },
   async refresh() {
     renderScreen(state.screen)
   },
@@ -165,6 +203,7 @@ const ctx = {
 function navHtml(active) {
   return `
     <nav class="bottom-nav">
+      <div class="nav-pill"></div>
       <button class="nav-item ${active === 'library' ? 'active' : ''}" data-nav="library" data-tooltip="View your documents">
         ${icon('book')}<span>Library</span>
       </button>
@@ -181,12 +220,45 @@ function navHtml(active) {
     </nav>`
 }
 
+function moveNavPill(screen) {
+  const nav = document.querySelector('.bottom-nav')
+  if (!nav) return
+  const pill = nav.querySelector('.nav-pill')
+  if (!pill) return
+  // Hide on Add/import screen — no nav tab owns it
+  const active = nav.querySelector('.nav-item.active')
+  if (!active) { pill.style.opacity = '0'; return }
+  const navRect = nav.getBoundingClientRect()
+  const r = active.getBoundingClientRect()
+  pill.style.opacity = '1'
+  pill.style.left = (r.left - navRect.left) + 'px'
+  pill.style.top = (r.top - navRect.top) + 'px'
+  pill.style.width = r.width + 'px'
+  pill.style.height = r.height + 'px'
+}
+let pillRaf = 0
+addEventListener('resize', () => {
+  cancelAnimationFrame(pillRaf)
+  pillRaf = requestAnimationFrame(() => moveNavPill(state.screen))
+}, { passive: true })
+
 let renderToken = 0
+let currentRoot = null
+let currentScreen = null
 
 async function renderScreen(name) {
   const token = ++renderToken
-  const Screen = SCREENS[name]
+  const Screen = await loadScreen(name)
   if (!Screen) return
+
+  if (currentScreen) {
+    const prev = await loadScreen(currentScreen)
+    if (prev?.unmount) {
+      try { prev.unmount(currentRoot, ctx) } catch {}
+    }
+  }
+  currentScreen = name
+  currentRoot = null
 
   window.__quizAccountId = state.account?.id || 'default'
 
@@ -202,17 +274,21 @@ async function renderScreen(name) {
 
       app.innerHTML = ''
       app.appendChild(frag)
+      currentRoot = tempRoot
       await Screen.render(tempRoot, ctx)
       if (token !== renderToken) return
+      window.dispatchEvent(new Event('quizScreenChanged'))
 
       app.querySelectorAll('[data-nav]').forEach(btn =>
         btn.addEventListener('click', () => go(btn.dataset.nav))
       )
+      moveNavPill(state.screen)
     } else {
       const rootDiv = document.createElement('div')
       frag.appendChild(rootDiv)
       app.innerHTML = ''
       app.appendChild(frag)
+      currentRoot = rootDiv
       await Screen.render(rootDiv, ctx)
     }
   } catch (err) {
@@ -228,6 +304,7 @@ async function renderScreen(name) {
 
 function go(nav) {
   state.screen = nav
+  moveNavPill(nav)
   renderScreen(nav)
   window.scrollTo(0, 0)
 }
@@ -238,6 +315,20 @@ document.addEventListener('keydown', e => {
 
 const boot = document.getElementById('boot')
 if (boot) boot.remove()
+
+// Magic ripple: any primary button or quiz option spawns a glow at the press
+// point. One delegated listener covers every screen, current and future.
+document.addEventListener('pointerdown', e => {
+  const btn = e.target instanceof Element ? e.target.closest('.btn-primary, .opt-btn') : null
+  if (!btn) return
+  const rect = btn.getBoundingClientRect()
+  const r = document.createElement('span')
+  r.className = 'ripple'
+  r.style.left = (e.clientX - rect.left) + 'px'
+  r.style.top = (e.clientY - rect.top) + 'px'
+  btn.appendChild(r)
+  setTimeout(() => r.remove(), 550)
+})
 
 async function bootFlow() {
   await ensureDefaultAccount()
@@ -250,47 +341,61 @@ async function bootFlow() {
     return
   }
 
-  let accounts = await listAccounts()
-  const savedId = localStorage.getItem('quizforge-active-account')
+  const accounts = await listAccounts()
+  const savedId = localStorage.getItem('quizard-active-account')
 
   const onlyDefault = accounts.length === 1 && !(await accountHasData(accounts[0].id))
-  if (onlyDefault) {
-    state.accountsExist = false
-    state.screen = 'welcome'
-    renderScreen('welcome')
+  state.accountsExist = !onlyDefault
+
+  // Repeat launches get the short splash; first launch gets the full show.
+  state.shortIntro = !!settings.onboarded
+
+  const landing = resolveLanding(accounts, savedId, onlyDefault)
+
+  // "Don't show the intro" setting — go straight to the landing screen.
+  if (settings.skipIntro) {
+    state.screen = landing.screen
+    state.accountFlow = landing.accountFlow || null
+    if (landing.askResume) state.pendingResumeAsk = true
+    renderScreen(landing.screen)
     return
   }
-  state.accountsExist = true
 
+  // Every cold start opens with the magical welcome splash, which then
+  // hands off to the screen the user would have landed on.
+  state.afterIntro = landing.screen
+  state.accountFlow = landing.accountFlow || null
+  state.pendingResumeAsk = !!landing.askResume
+  state.screen = 'welcome'
+  renderScreen('welcome')
+}
+
+// Work out where the app should land after the welcome intro, performing
+// any account setup the old boot path used to do before rendering.
+// The original onboarding slides always play after the splash; only a
+// PIN-locked or multi-profile hand-off routes to the accounts screen first.
+function resolveLanding(accounts, savedId, onlyDefault) {
   const saved = savedId ? accounts.find(a => a.id === savedId) : null
-  if (!saved && accounts.length === 1 && !accounts[0].pinHash) {
+  const settled = !onlyDefault && (saved || accounts.length > 1 || accounts[0]?.pinHash)
+  const home = settings.skipIntro && settled ? 'library' : 'onboarding'
+  if (onlyDefault || (!saved && accounts.length === 1 && !accounts[0].pinHash)) {
     setActiveAccount(accounts[0].id)
     state.account = accounts[0]
     window.__quizAccountId = accounts[0].id
-    detectResumeBanner(accounts[0].id)
-    const initial = settings.onboarded ? 'library' : 'onboarding'
-    state.screen = initial
-    renderScreen(initial)
-    return
+    const askResume = !!detectResumeBanner(accounts[0].id)
+    return { screen: home, askResume }
   }
   if (!saved) {
-    state.screen = 'picker'
-    renderScreen('picker')
-    return
+    return { screen: 'accounts', accountFlow: { mode: 'picker' } }
   }
   if (saved.pinHash) {
-    state.accountFlow = { mode: 'lock', accountId: saved.id }
-    state.screen = 'accounts'
-    renderScreen('accounts')
-    return
+    return { screen: 'accounts', accountFlow: { mode: 'lock', accountId: saved.id } }
   }
   setActiveAccount(saved.id)
   state.account = saved
   window.__quizAccountId = saved.id
-  detectResumeBanner(saved.id)
-  const initial = settings.onboarded ? 'library' : 'onboarding'
-  state.screen = initial
-  renderScreen(initial)
+  const askResume = !!detectResumeBanner(saved.id)
+  return { screen: home, askResume }
 }
 
 bootFlow()
