@@ -3,7 +3,8 @@ import { testApiKey } from '../../lib/llm/gemini.js'
 import { maybeScheduleReminders } from '../reminders.js'
 import { icon } from '../icons.js'
 import { esc, sectionTitle, row, muted, card, btn } from '../helpers.js'
-import { confirmModal } from '../confirmModal.js'
+import { confirmModal, promptModal } from '../confirmModal.js'
+import { encryptBackup, decryptBackup } from '../../lib/crypto-backup.js'
 
 function logoutToPicker(ctx) {
   setActiveAccount(null)
@@ -111,6 +112,15 @@ export async function render(root, ctx) {
         <button class="btn btn-primary" id="export-btn" data-tooltip="Download all data as a single JSON file">${icon('download')} Export backup (.json)</button>
         <button class="btn btn-secondary" id="import-btn" style="margin-top:10px;width:100%" data-tooltip="Restore from a previously exported backup">${icon('database')} Import backup</button>
         <input type="file" id="import-input" accept=".json,application/json" aria-label="Import backup file" hidden />
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+        <div class="label" style="margin-bottom:4px">Encrypted backup — safe for your own cloud storage</div>
+        <p class="muted" style="font-size:12.5px;line-height:1.5;margin:0 0 12px">
+          A passphrase-protected backup (AES-GCM). Unreadable without your passphrase,
+          so you can keep it in Google Drive or anywhere — no server, no account.
+        </p>
+        <button class="btn btn-primary" id="enc-export-btn" data-tooltip="Download a passphrase-encrypted backup">${icon('lock')} Encrypted backup</button>
+        <button class="btn btn-secondary" id="enc-import-btn" style="margin-top:10px;width:100%" data-tooltip="Restore from an encrypted backup file">${icon('database')} Restore encrypted backup</button>
+        <input type="file" id="enc-import-input" accept=".json,application/json" aria-label="Import encrypted backup file" hidden />
         <p class="faint" id="usage-line" style="font-size:12px;margin-top:12px"></p>
       `, { style: 'padding:16px' })}
 
@@ -348,6 +358,91 @@ export async function render(root, ctx) {
     mask.querySelector('#imp-merge').addEventListener('click', () => run('merge'))
     mask.querySelector('#imp-replace').addEventListener('click', async () => {
       if (await confirmModal('Replace all data?', 'All current documents, quizzes and history will be replaced by the backup. <b>This cannot be undone.</b>', { confirmLabel: 'Replace' })) run('replace')
+    })
+  })
+
+  /* ── Encrypted backup: passphrase-protected file safe to store anywhere ── */
+  const encInput = root.querySelector('#enc-import-input')
+  root.querySelector('#enc-export-btn').addEventListener('click', async () => {
+    const passphrase = await promptModal(
+      'Encrypted backup',
+      'Choose a passphrase. The backup file is <b>unreadable without it</b> — safe to store in your own Google Drive, email or USB. There is <b>no recovery</b> if you forget it.',
+      { confirmLabel: 'Encrypt & download', placeholder: 'Passphrase (4+ characters)', mask: true }
+    )
+    if (passphrase == null) return
+    if (passphrase.trim().length < 4) { ctx.toast('Passphrase must be at least 4 characters', true); return }
+    try {
+      const data = await exportAll()
+      const text = await encryptBackup(data, passphrase.trim())
+      const blob = new Blob([text], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const d = new Date()
+      a.href = url
+      a.download = `quizard-encrypted-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+      saveSettings({ lastBackupAt: Date.now() })
+      ctx.toast('Encrypted backup downloaded ✓ — store it in your Drive')
+      root.querySelector('.backup-nudge')?.remove()
+    } catch (err) {
+      ctx.toast('Encrypted export failed: ' + err.message, true)
+    }
+  })
+  root.querySelector('#enc-import-btn').addEventListener('click', () => encInput.click())
+  encInput.addEventListener('change', async () => {
+    const file = encInput.files[0]
+    if (!file) return
+    const raw = await file.text()
+    let probe = null
+    try { probe = JSON.parse(raw) } catch { ctx.toast('That file is not valid JSON', true); encInput.value = ''; return }
+    if (probe?.app !== 'quizard-encrypted') { ctx.toast('Not an encrypted Quizard backup — use Import backup', true); encInput.value = ''; return }
+    const passphrase = await promptModal(
+      'Restore encrypted backup',
+      'Enter the passphrase this backup was encrypted with.',
+      { confirmLabel: 'Decrypt & restore', placeholder: 'Passphrase', mask: true }
+    )
+    if (passphrase == null) { encInput.value = ''; return }
+    let data
+    try {
+      data = await decryptBackup(raw, passphrase)
+    } catch (err) {
+      ctx.toast(err.message, true)
+      encInput.value = ''
+      return
+    }
+    const docCount = data.docs?.length || 0
+    const mask = document.createElement('div')
+    mask.className = 'quit-dialog-mask'
+    mask.innerHTML = `
+      <div class="quit-dialog">
+        <h3>Restore encrypted backup?</h3>
+        <p>Contains ${docCount} document${docCount === 1 ? '' : 's'}${data.attempts?.length ? ` and ${data.attempts.length} quiz attempt${data.attempts.length === 1 ? '' : 's'}` : ''}.</p>
+        <div class="quit-actions">
+          <button class="btn btn-primary" id="enc-merge">Merge with current data</button>
+          <button class="btn btn-danger-ghost" id="enc-replace">Replace everything</button>
+          <button class="btn btn-secondary" id="enc-cancel">Cancel</button>
+        </div>
+      </div>`
+    document.body.appendChild(mask)
+    const close = () => { mask.remove(); encInput.value = '' }
+    mask.querySelector('#enc-cancel').addEventListener('click', close)
+    const run = async mode => {
+      try {
+        const res = await importAll(data, mode)
+        ctx.toast(`Restored ${res.docs} docs, ${res.attempts} attempts ✓`)
+        close()
+        ctx.refresh()
+      } catch (err) {
+        ctx.toast('Restore failed: ' + err.message, true)
+        close()
+      }
+    }
+    mask.querySelector('#enc-merge').addEventListener('click', () => run('merge'))
+    mask.querySelector('#enc-replace').addEventListener('click', async () => {
+      if (await confirmModal('Replace all data?', 'All current data will be replaced by the decrypted backup. <b>This cannot be undone.</b>', { confirmLabel: 'Replace' })) run('replace')
     })
   })
 

@@ -85,16 +85,44 @@ describe('results: what-next data', () => {
   })
 })
 
-// The deterministic reviewer self-test: same doc + fixed seed → same questions.
+// The deterministic reviewer self-test: same doc + fixed seed → same questions,
+// and the handout can render every returned type.
 describe('reviewer: deterministic self-test', () => {
-  it('generates stable mcq/id questions for the handout', () => {
+  const RENDERABLE = ['mcq', 'tf', 'fib', 'id', 'matching', 'ordering']
+  it('generates stable questions across all static-renderable types', () => {
     const doc = { id: 'doc-note-1', name: 'photosynthesis.pdf', text: SAMPLE_TEXT }
-    const cfg = { count: 5, mix: { mcq: true, id: true }, difficulty: 'medium', shuffle: false, fixedSeed: 7 }
+    const cfg = { count: 6, mix: { mcq: true, tf: true, fib: true, id: true, matching: true, ordering: true }, difficulty: 'medium', shuffle: false, fixedSeed: 7 }
     const a = generateQuiz(doc, cfg)
     const b = generateQuiz(doc, cfg)
     expect(a.questions.length).toBeGreaterThan(0)
-    expect(a.questions.map(q => q.stem || q.clue)).toEqual(b.questions.map(q => q.stem || q.clue))
-    expect(a.questions.every(q => q.type === 'mcq' || q.type === 'id')).toBe(true)
+    expect(a.questions.map(q => q.stem || q.clue || q.prompt || q.statement)).toEqual(
+      b.questions.map(q => q.stem || q.clue || q.prompt || q.statement))
+    expect(a.questions.every(q => RENDERABLE.includes(q.type))).toBe(true)
+    // matching + ordering carry their answer structures
+    for (const q of a.questions.filter(q => q.type === 'matching')) {
+      expect(q.pairs?.length).toBeGreaterThan(0)
+      expect(q.rightOrder?.length).toBe(q.pairs?.length)
+    }
+    for (const q of a.questions.filter(q => q.type === 'ordering')) {
+      expect(q.steps?.length).toBeGreaterThan(0)
+      expect(q.shuffled?.length).toBe(q.steps?.length)
+    }
+  })
+})
+
+// Encrypted backup round-trip: encrypt → decrypt restores the original data;
+// a wrong passphrase must fail cleanly.
+describe('encrypted backup round-trip', () => {
+  it('decrypts with the right passphrase and rejects the wrong one', async () => {
+    const { encryptBackup, decryptBackup } = await import('../src/lib/crypto-backup.js')
+    const data = { app: 'quizard', docs: [{ id: 'd1', name: 'x' }], attempts: [] }
+    const text = await encryptBackup(data, 'open sesame')
+    const parsed = JSON.parse(text)
+    expect(parsed.app).toBe('quizard-encrypted')
+    const restored = await decryptBackup(text, 'open sesame')
+    expect(restored.docs[0].name).toBe('x')
+    await expect(decryptBackup(text, 'wrong-pass')).rejects.toThrow(/Wrong passphrase/)
+    await expect(decryptBackup('{"hello":1}', 'x')).rejects.toThrow(/Not an encrypted Quizard backup/)
   })
 })
 

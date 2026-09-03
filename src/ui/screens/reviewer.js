@@ -74,15 +74,16 @@ export async function render(root, ctx) {
         if (def) keyTermDefs.push({ term, def })
       }
     }
-    // deterministic self-test questions (stable across re-opens)
+    // deterministic self-test questions (stable across re-opens) — all the
+    // static-renderable types; short answers need AI grading, so excluded
     const q = generateQuiz(doc, {
-      count: 5,
-      mix: { mcq: true, id: true },
+      count: 6,
+      mix: { mcq: true, tf: true, fib: true, id: true, matching: true, ordering: true },
       difficulty: 'medium',
       shuffle: false,
       fixedSeed: 7
     })
-    reviewQs = (q.questions || []).filter(q => q.type === 'mcq' || q.type === 'id')
+    reviewQs = (q.questions || []).filter(q => q.type !== 'short')
     readTargets = {
       summary: summary.sections.flatMap(s => s.points),
       full: sections.flatMap(s => s.paras)
@@ -143,21 +144,58 @@ export async function render(root, ctx) {
         <div class="rvw-part">
           <div class="rvw-part-head"><span class="rvw-num">IV</span><h3>Test Yourself</h3></div>
           <ol class="rvq-list">
-            ${reviewQs.map(q => {
-              const qText = q.type === 'mcq' ? esc(q.stem) : `Identify the term: ${esc(q.clue)}`
-              const opts = q.type === 'mcq'
-                ? `<div class="rvq-opts">${(q.options || []).map((o, oi) => `<span>${String.fromCharCode(65 + oi)}. ${esc(o)}</span>`).join('')}</div>`
-                : ''
-              const ans = q.type === 'mcq' ? (q.options?.[q.answerIndex] ?? '') : (q.answer ?? '')
-              return `<li class="rvq">
-                <div class="rvq-q">${qText}${opts}</div>
-                <details class="rvq-reveal"><summary>Check answer</summary><span>${esc(ans)}</span></details>
-              </li>`
-            }).join('')}
+            ${reviewQs.map(q => selfTestItemHtml(q)).join('')}
           </ol>
         </div>`)
     }
     return parts.join('') + `<p class="sum-note">Forged from your document — open <strong>Full text</strong> to read everything.</p>`
+  }
+
+  // Renders one self-test item for any static-renderable question type,
+  // with its answer hidden behind a reveal.
+  function selfTestItemHtml(q) {
+    const TYPE_LABEL = { mcq: '', tf: 'TRUE or FALSE', fib: '', id: '', matching: 'MATCHING', ordering: 'ORDERING' }
+    let qText = ''
+    let optsHtml = ''
+    let ansHtml = ''
+    const optList = (arr, numbered = false) =>
+      `<div class="rvq-opts">${(arr || []).map((o, oi) =>
+        `<span>${numbered ? oi + 1 + '.' : String.fromCharCode(65 + oi) + '.'} ${esc(o)}</span>`).join('')}</div>`
+
+    if (q.type === 'mcq') {
+      qText = esc(q.stem)
+      optsHtml = optList(q.options)
+      ansHtml = q.options?.[q.answerIndex] ?? ''
+    } else if (q.type === 'tf') {
+      qText = `<span class="rvq-tag">T/F</span> ${esc(q.statement)}`
+      ansHtml = q.answer ? 'True' : 'False'
+    } else if (q.type === 'fib') {
+      qText = esc(q.stem)
+      optsHtml = optList(q.choices, true)
+      ansHtml = q.choices?.[q.answerIndex] ?? ''
+    } else if (q.type === 'id') {
+      qText = `Identify the term: ${esc(q.clue)}`
+      ansHtml = q.answer ?? ''
+    } else if (q.type === 'matching') {
+      qText = `${esc(q.prompt)}`
+      optsHtml = `
+        <div class="rvq-opts rvq-match">
+          <div class="rvq-match-col"><b>Terms</b>${(q.pairs || []).map(p => `<span>${esc(p.left)}</span>`).join('')}</div>
+          <div class="rvq-match-col"><b>Definitions</b>${(q.rightOrder || []).map(pi => `<span>${esc(q.pairs?.[pi]?.right || '')}</span>`).join('')}</div>
+        </div>`
+      ansHtml = (q.pairs || []).map(p => `${p.left} → ${p.right}`).join(' · ')
+    } else if (q.type === 'ordering') {
+      qText = `${esc(q.prompt)}`
+      optsHtml = optList(q.shuffled || q.steps, true)
+      ansHtml = (q.steps || []).map((s, si) => `${si + 1}. ${s}`).join('  ·  ')
+    } else {
+      return ''
+    }
+    const tag = TYPE_LABEL[q.type] ? `<span class="rvq-tag">${TYPE_LABEL[q.type]}</span> ` : ''
+    return `<li class="rvq">
+      <div class="rvq-q">${tag}${qText}${optsHtml}</div>
+      <details class="rvq-reveal"><summary>Check answer</summary><span>${esc(ansHtml)}</span></details>
+    </li>`
   }
 
   function fullHtml() {

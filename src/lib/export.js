@@ -147,19 +147,42 @@ export async function exportPdfHandout(doc, extras = {}) {
     })
   }
 
-  // IV. self-test
+  // IV. self-test — all static-renderable types
   if (extras.reviewQs?.length) {
     rule()
     text('IV. Test Yourself', { size: 13, bold: true, color: '#5b3df5' })
     extras.reviewQs.forEach((q, i) => {
-      need(40)
-      const qText = q.type === 'mcq' ? q.stem : `Identify the term: ${q.clue}`
-      text(`${i + 1}. ${qText}`, { size: 10.5, bold: true, gap: 2 })
-      if (q.type === 'mcq' && q.options) {
-        q.options.forEach((o, oi) => text(`${'ABCDEFGH'[oi]}. ${o}`, { size: 10, color: '#475069', indent: 12, gap: 1 }))
+      need(50)
+      const optLine = (arr, numbered = false) => {
+        if (!arr) return
+        arr.forEach((o, oi) => text(`${numbered ? oi + 1 + '.' : 'ABCDEFGH'[oi] + '.'} ${o}`, { size: 10, color: '#475069', indent: 12, gap: 1 }))
       }
-      const ans = q.type === 'mcq' ? q.options?.[q.answerIndex] : q.answer
-      text(`Answer: ${ans}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      if (q.type === 'mcq') {
+        text(`${i + 1}. ${q.stem}`, { size: 10.5, bold: true, gap: 2 })
+        optLine(q.options)
+        text(`Answer: ${q.options?.[q.answerIndex] ?? ''}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      } else if (q.type === 'tf') {
+        text(`${i + 1}. [T/F] ${q.statement}`, { size: 10.5, bold: true, gap: 2 })
+        text(`Answer: ${q.answer ? 'True' : 'False'}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      } else if (q.type === 'fib') {
+        text(`${i + 1}. ${q.stem}`, { size: 10.5, bold: true, gap: 2 })
+        optLine(q.choices, true)
+        text(`Answer: ${q.choices?.[q.answerIndex] ?? ''}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      } else if (q.type === 'id') {
+        text(`${i + 1}. Identify the term: ${q.clue}`, { size: 10.5, bold: true, gap: 2 })
+        text(`Answer: ${q.answer ?? ''}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      } else if (q.type === 'matching') {
+        text(`${i + 1}. [MATCHING] ${q.prompt}`, { size: 10.5, bold: true, gap: 2 })
+        text('Terms:', { size: 10, color: '#475069', indent: 12, gap: 1 })
+        ;(q.pairs || []).forEach(p => text(`• ${p.left}`, { size: 10, color: '#475069', indent: 20, gap: 1 }))
+        text('Definitions:', { size: 10, color: '#475069', indent: 12, gap: 1 })
+        ;(q.rightOrder || []).forEach(pi => text(`• ${q.pairs?.[pi]?.right || ''}`, { size: 10, color: '#475069', indent: 20, gap: 1 }))
+        text(`Answer: ${(q.pairs || []).map(p => `${p.left} → ${p.right}`).join(' · ')}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      } else if (q.type === 'ordering') {
+        text(`${i + 1}. [ORDERING] ${q.prompt}`, { size: 10.5, bold: true, gap: 2 })
+        optLine(q.shuffled || q.steps, true)
+        text(`Answer: ${(q.steps || []).map((s, si) => `${si + 1}. ${s}`).join('  ')}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+      }
     })
   }
 

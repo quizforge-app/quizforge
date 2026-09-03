@@ -4,6 +4,7 @@ import './styles/screens.css'
 
 import * as library from './ui/screens/library.js'
 import { saveAttempt, loadSettings, saveSettings, ensureDefaultAccount, listAccounts, setActiveAccount, getAccount, accountHasData } from './lib/storage.js'
+import { initNotificationActions, consumePendingReview } from './ui/reminders.js'
 import { icon } from './ui/icons.js'
 import { initTooltips } from './ui/tooltip.js'
 
@@ -316,6 +317,15 @@ document.addEventListener('keydown', e => {
 const boot = document.getElementById('boot')
 if (boot) boot.remove()
 
+// Actionable notification: "Review now" on the Android reminder routes into
+// the due-card review as soon as the app is on a screen that can host it.
+initNotificationActions()
+addEventListener('quizard:due-review', () => {
+  if (state.screen === 'library') {
+    import('./ui/mistakes.js').then(m => m.startDueReview(ctx)).catch(() => {})
+  }
+})
+
 // Magic ripple: any primary button or quiz option spawns a glow at the press
 // point. One delegated listener covers every screen, current and future.
 document.addEventListener('pointerdown', e => {
@@ -358,6 +368,7 @@ async function bootFlow() {
     state.accountFlow = landing.accountFlow || null
     if (landing.askResume) state.pendingResumeAsk = true
     renderScreen(landing.screen)
+    if (landing.screen === 'library') setTimeout(() => consumePendingReview(ctx), 2000)
     return
   }
 

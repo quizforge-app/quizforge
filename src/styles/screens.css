@@ -576,6 +576,23 @@ html[data-theme='dark'] .rvw-term dt { color: var(--accent); }
 .rvq-q { font-size: 13.5px; line-height: 1.55; color: var(--text); font-weight: 600; }
 .rvq-q::before { content: counter(rvq) '. '; color: var(--accent); font-weight: 800; }
 .rvq-opts { display: grid; gap: 4px; margin-top: 8px; font-weight: 400; color: var(--text-dim); }
+.rvq-tag {
+  display: inline-block;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px; margin-right: 6px;
+  vertical-align: middle;
+}
+.rvq-match { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rvq-match-col { display: grid; gap: 4px; align-content: start; }
+.rvq-match-col b { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+.rvq-match-col span { font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+/* two-column grids collapse on narrow phones */
+@media (max-width: 380px) {
+  .rvq-match { grid-template-columns: 1fr; }
+}
 .rvq-reveal { margin-top: 10px; }
 .rvq-reveal summary {
   cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent);
