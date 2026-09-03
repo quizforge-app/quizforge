@@ -1,11 +1,31 @@
 // SM-2 lite spaced repetition. Pure functions — no storage, no dom.
 
+/**
+ * @typedef {'again' | 'hard' | 'good' | 'easy'} Grade
+ */
+
+/**
+ * @typedef {Object} SrsState
+ * @property {number} ease - Ease factor (1.3–3.0)
+ * @property {number} intervalDays - Current interval in days
+ * @property {number} dueAt - Timestamp when card is next due
+ * @property {number} reps - Successful repetitions since last lapse
+ * @property {number} lapses - Total number of lapses
+ * @property {number} lastReviewedAt - Timestamp of last review
+ */
+
+/** @type {{ again: 0, hard: 1, good: 2, easy: 3 }} */
 export const GRADES = { again: 0, hard: 1, good: 2, easy: 3 }
 
 const MIN_EASE = 1.3
 const MAX_EASE = 3.0
 const DAY_MS = 86400000
 
+/**
+ * Create a fresh SRS state for a new card.
+ * @param {number} [now=Date.now()] - Current timestamp
+ * @returns {SrsState}
+ */
 export function newState(now = Date.now()) {
   return {
     ease: 2.5,
@@ -17,11 +37,21 @@ export function newState(now = Date.now()) {
   }
 }
 
+/**
+ * @param {number} e - Ease value to clamp
+ * @returns {number}
+ */
 function clampEase(e) {
   return Math.min(MAX_EASE, Math.max(MIN_EASE, e))
 }
 
-// grade: 'again' | 'hard' | 'good' | 'easy'
+/**
+ * Advance SRS state after a grade.
+ * @param {SrsState | null} state - Current state (null creates fresh)
+ * @param {Grade | number} grade - The grade given
+ * @param {number} [now=Date.now()] - Current timestamp
+ * @returns {SrsState}
+ */
 export function nextState(state, grade, now = Date.now()) {
   const s = { ...(state || newState(now)), lastReviewedAt: now }
   const ease = s.ease ?? 2.5
@@ -58,6 +88,12 @@ export function nextState(state, grade, now = Date.now()) {
   return s
 }
 
+/**
+ * Check whether a card is due for review.
+ * @param {SrsState | null} state - Card state (null = due)
+ * @param {number} [now=Date.now()] - Current timestamp
+ * @returns {boolean}
+ */
 export function isDue(state, now = Date.now()) {
   if (!state) return true
   return (state.dueAt ?? 0) <= now

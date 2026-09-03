@@ -1,4 +1,4 @@
-import JSZip from 'jszip'
+let JSZip = null
 
 function decodeXml(s) {
   return s
@@ -11,6 +11,7 @@ function decodeXml(s) {
 }
 
 export async function extractPptx(file) {
+  if (!JSZip) JSZip = (await import('jszip')).default
   const buf = await file.arrayBuffer()
   const zip = await JSZip.loadAsync(buf)
 

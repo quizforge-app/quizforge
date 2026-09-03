@@ -35,15 +35,33 @@ export function buildSummaryMarkdown(doc) {
     sec.points.forEach(p => out.push(`- ${p}`))
     out.push('')
   })
-  out.push('---', `_${doc.wordCount.toLocaleString()} words · exported from QuizForge_`, '')
+  out.push('---', `_${doc.wordCount.toLocaleString()} words · exported from Quizard_`, '')
   return out.join('\n')
 }
 
 export function buildQuizMarkdown(docName, questions, review) {
   const out = [`# Quiz — ${docName}`, '', `_Generated ${stamp()}_`, '']
   questions.forEach((q, i) => {
-    const prompt = q.statement || q.stem || q.clue || ''
-    const typeLabel = q.type === 'id' ? 'IDENTIFY' : q.type === 'tf' ? 'TRUE/FALSE' : q.type === 'fib' ? 'FILL BLANK' : 'MULTIPLE CHOICE'
+    const prompt = q.statement || q.stem || q.clue || q.prompt || ''
+    if (q.type === 'matching') {
+      out.push(`**${i + 1}. [MATCHING]** ${q.prompt || 'Match each term to its definition'}`)
+      ;(q.pairs || []).forEach(p => out.push(`   - ${p.left} → ${p.right}`))
+      out.push('**Answer:** match the pairs above')
+      const rev = review?.[i]
+      if (rev && !rev.ok && rev.chosen != null) out.push(`_Your attempt: ${rev.chosen}_`)
+      out.push('')
+      return
+    }
+    if (q.type === 'ordering') {
+      out.push(`**${i + 1}. [ORDERING]** ${q.prompt || 'Put the steps in the correct order'}`)
+      ;(q.steps || []).forEach((s, k) => out.push(`   ${k + 1}. ${s}`))
+      out.push('**Answer:** the numbered order above')
+      const rev = review?.[i]
+      if (rev && !rev.ok && rev.chosen != null) out.push(`_Your attempt: ${rev.chosen}_`)
+      out.push('')
+      return
+    }
+    const typeLabel = q.type === 'id' ? 'IDENTIFY' : q.type === 'tf' ? 'TRUE/FALSE' : q.type === 'fib' ? 'FILL BLANK' : q.type === 'short' ? 'SHORT ANSWER' : 'MULTIPLE CHOICE'
     out.push(`**${i + 1}. [${typeLabel}]** ${prompt}`)
     let opts = null
     if (q.type === 'mcq' || q.type === 'fib') opts = q.options || q.choices
@@ -52,7 +70,7 @@ export function buildQuizMarkdown(docName, questions, review) {
       const letters = optionLetters(opts.length)
       opts.forEach((o, k) => out.push(`   ${letters[k]}. ${o}`))
     }
-    const answer = q.type === 'id'
+    const answer = q.type === 'id' || q.type === 'short'
       ? q.answer
       : q.type === 'tf'
         ? String(q.answer)
@@ -62,17 +80,17 @@ export function buildQuizMarkdown(docName, questions, review) {
     if (rev && !rev.ok && rev.chosen != null) out.push(`_Your answer: ${rev.chosen}_`)
     out.push('')
   })
-  out.push('---', '_Exported from QuizForge_', '')
+  out.push('---', '_Exported from Quizard_', '')
   return out.join('\n')
 }
 
 export function exportSummary(doc) {
-  download(`quizforge-summary-${slug(doc.name)}.md`, buildSummaryMarkdown(doc))
+  download(`quizard-summary-${slug(doc.name)}.md`, buildSummaryMarkdown(doc))
 }
 
 export function exportQuiz(docName, lastResult) {
   if (!lastResult?.questions?.length) return false
-  download(`quizforge-quiz-${slug(docName)}.md`, buildQuizMarkdown(docName, lastResult.questions, lastResult.review))
+  download(`quizard-quiz-${slug(docName)}.md`, buildQuizMarkdown(docName, lastResult.questions, lastResult.review))
   return true
 }
 
@@ -90,7 +108,7 @@ export function printStudySheet(doc) {
       h1{font-size:22px} h2{font-size:16px;margin-top:22px;color:#5b3df5} ul{margin:6px 0} li{margin:3px 0}
       .meta{color:#868ea8;font-size:13px} hr{border:none;border-top:1px solid #e4e9f2;margin:18px 0}
     </style></head><body>
-    <h1>${escHtml(doc.name)}</h1><p class="meta">Study sheet · ${doc.wordCount.toLocaleString()} words · exported from QuizForge</p>
+    <h1>${escHtml(doc.name)}</h1><p class="meta">Study sheet · ${doc.wordCount.toLocaleString()} words · exported from Quizard</p>
     ${tldr}${sections}
     <hr><p class="meta">Generated ${stamp()}</p>
     <script>window.onload=function(){setTimeout(function(){window.print()},250)}</script>

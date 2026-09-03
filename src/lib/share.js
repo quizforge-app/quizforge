@@ -25,8 +25,8 @@ async function gzip(bytes) {
   if (typeof CompressionStream === 'undefined') throw new Error('no-compress')
   const cs = new CompressionStream('gzip')
   const w = cs.writable.getWriter()
-  w.write(bytes)
-  w.close()
+  await w.write(bytes)
+  await w.close()
   const buf = await new Response(cs.readable).arrayBuffer()
   return new Uint8Array(buf)
 }
@@ -35,15 +35,19 @@ async function gunzip(bytes) {
   if (typeof DecompressionStream === 'undefined') throw new Error('no-decompress')
   const ds = new DecompressionStream('gzip')
   const w = ds.writable.getWriter()
-  w.write(bytes)
-  w.close()
+  await w.write(bytes)
+  await w.close()
   const buf = await new Response(ds.readable).arrayBuffer()
   return new Uint8Array(buf)
 }
 
 // Keep only the fields the quiz renderer needs; drop image refs (recipients
 // have no local image) and explanations (saved space; re-derivable if needed).
-const KEEP = ['type', 'stem', 'clue', 'statement', 'options', 'choices', 'answerIndex', 'meta', 'difficulty']
+const KEEP = [
+  'type', 'stem', 'clue', 'statement', 'options', 'choices', 'answerIndex',
+  'prompt', 'answer', 'pairs', 'rightOrder', 'steps', 'shuffled',
+  'meta', 'difficulty'
+]
 
 function cleanQuestion(q) {
   const o = {}

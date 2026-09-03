@@ -1,8 +1,22 @@
 import { openDB } from 'idb'
 import { nextState, GRADES } from './srs.js'
 
-const dbPromise = openDB('quizforge', 5, {
-  upgrade(db, oldVersion) {
+/** @typedef {import('./db-types.js').Doc} Doc */
+/** @typedef {import('./db-types.js').DocMeta} DocMeta */
+/** @typedef {import('./db-types.js').Account} Account */
+/** @typedef {import('./db-types.js').Attempt} Attempt */
+/** @typedef {import('./db-types.js').Mistake} Mistake */
+/** @typedef {import('./db-types.js').SrsRecord} SrsRecord */
+/** @typedef {import('./db-types.js').Deck} Deck */
+/** @typedef {import('./db-types.js').DocImage} DocImage */
+/** @typedef {import('./db-types.js').WeakTerm} WeakTerm */
+
+const dbPromise = openDB('quizard', 8, {
+  upgrade(db, oldVersion, _newVersion, transaction) {
+    if (oldVersion < 8) {
+      // docs gain optional `original` (source file blob) and `visualAnalysis`
+      // (cached Gemini document analysis) fields — no structural change needed.
+    }
     if (oldVersion < 1) {
       const docs = db.createObjectStore('docs', { keyPath: 'id' })
       docs.createIndex('createdAt', 'createdAt')
@@ -24,6 +38,16 @@ const dbPromise = openDB('quizforge', 5, {
     if (oldVersion < 5) {
       const srs = db.createObjectStore('srs', { keyPath: 'id' })
       srs.createIndex('docId', 'docId')
+    }
+    if (oldVersion < 6) {
+      const srs = transaction.objectStore('srs')
+      if (!srs.indexNames.contains('accountId')) srs.createIndex('accountId', 'accountId')
+      if (!srs.indexNames.contains('dueAt')) srs.createIndex('dueAt', 'dueAt')
+    }
+    if (oldVersion < 7) {
+      const decks = db.createObjectStore('decks', { keyPath: 'id' })
+      decks.createIndex('accountId', 'accountId')
+      decks.createIndex('name', 'name')
     }
   },
   async blocked() { /* another tab holds an older connection */ }
@@ -67,8 +91,8 @@ let activeAccountId = null
 
 export function setActiveAccount(id) {
   activeAccountId = id
-  if (id) localStorage.setItem('quizforge-active-account', id)
-  else localStorage.removeItem('quizforge-active-account')
+  if (id) localStorage.setItem('quizard-active-account', id)
+  else localStorage.removeItem('quizard-active-account')
 }
 
 export function getActiveAccountId() {
@@ -116,7 +140,7 @@ export async function hashPin(pin) {
 }
 
 async function legacySha256Hex(pin) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('quizforge:' + pin))
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('quizard:' + pin))
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
@@ -151,12 +175,16 @@ export async function createAccount({ name, pinHash = null, color }) {
   return acc
 }
 
+/** @param {string} id @returns {Promise<Account | undefined>} */
 export async function getAccount(id) {
+  if (!id) return undefined
   const db = await dbPromise
   return db.get('accounts', id)
 }
 
+/** @param {string} id @param {Partial<Account>} patch @returns {Promise<Account | null>} */
 export async function updateAccount(id, patch) {
+  if (!id) return null
   const db = await dbPromise
   const acc = await db.get('accounts', id)
   if (!acc) return null
@@ -166,10 +194,11 @@ export async function updateAccount(id, patch) {
 }
 
 export async function deleteAccount(id) {
+  if (!id) return
   const db = await dbPromise
-  const tx = db.transaction(['accounts', 'docs', 'attempts', 'mistakes', 'images', 'srs'], 'readwrite')
+  const tx = db.transaction(['accounts', 'docs', 'attempts', 'mistakes', 'images', 'srs', 'decks'], 'readwrite')
   tx.objectStore('accounts').delete(id)
-  for (const storeName of ['docs', 'attempts', 'mistakes', 'images', 'srs']) {
+  for (const storeName of ['docs', 'attempts', 'mistakes', 'images', 'srs', 'decks']) {
     const store = tx.objectStore(storeName)
     let cursor = await store.openCursor()
     while (cursor) {
@@ -225,7 +254,8 @@ function mistakeId(docId, term, sentence) {
   return `${docId}__${term.toLowerCase().replace(/\s+/g, '-')}__${h >>> 0}`
 }
 
-export async function saveDoc({ name, type, text, topics, folder = null, tags = [] }) {
+/** @param {{ name: string, type: string, text: string, topics?: unknown[], folder?: string | null, tags?: string[], original?: Blob | null }} opts @returns {Promise<Doc>} */
+export async function saveDoc({ name, type, text, topics, folder = null, tags = [], original = null }) {
   const db = await dbPromise
   const accountId = await requireAccount()
   const doc = {
@@ -234,6 +264,8 @@ export async function saveDoc({ name, type, text, topics, folder = null, tags = 
     name,
     type,
     text,
+    original: original instanceof Blob ? original : null,
+    visualAnalysis: null,
     topics: Array.isArray(topics) ? topics : [],
     folder: folder && String(folder).trim() ? String(folder).trim() : null,
     tags: Array.isArray(tags) ? tags.map(t => String(t).trim()).filter(Boolean) : [],
@@ -248,21 +280,39 @@ export async function saveDoc({ name, type, text, topics, folder = null, tags = 
 
 export { deriveFolders, deriveTags } from './taxonomy.js'
 
+/** @param {string} id @returns {Promise<Doc | null>} */
 export async function getDoc(id) {
+  if (!id) return null
   const db = await dbPromise
   const doc = await db.get('docs', id)
   if (doc && activeAccountId && doc.accountId !== activeAccountId) return null
   return doc
 }
 
+/** @returns {Promise<DocMeta[]>} */
 export async function listDocs() {
   const db = await dbPromise
   const accountId = await requireAccount()
-  const all = await db.getAll('docs')
-  return all.filter(d => d.accountId === accountId).sort((a, b) => b.createdAt - a.createdAt)
+  // Project out the (potentially huge) `text` field — listings only need
+  // metadata, so we avoid pulling megabytes of prose into memory on every
+  // Library / History / Import render.
+  const out = []
+  let cursor = await db.transaction('docs').store.openCursor()
+  while (cursor) {
+    const d = cursor.value
+    if (d.accountId === accountId) {
+      const { text, original, visualAnalysis, ...meta } = d
+      out.push(meta)
+    }
+    cursor = await cursor.continue()
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt)
+  return out
 }
 
+/** @param {string} id @param {Partial<Doc>} patch @returns {Promise<Doc | null>} */
 export async function updateDoc(id, patch) {
+  if (!id) return null
   const db = await dbPromise
   const doc = await db.get('docs', id)
   if (!doc) return null
@@ -272,6 +322,7 @@ export async function updateDoc(id, patch) {
 }
 
 export async function deleteDoc(id) {
+  if (!id) return
   const db = await dbPromise
   const tx = db.transaction(['docs', 'attempts', 'images'], 'readwrite')
   tx.objectStore('docs').delete(id)
@@ -318,11 +369,13 @@ export async function listDocImages(docId) {
 }
 
 export async function countDocImages(docId) {
-  const all = await listDocImages(docId)
-  return all.length
+  const db = await dbPromise
+  return db.countFromIndex('images', 'docId', docId)
 }
 
+/** @param {string} id @returns {Promise<DocImage | undefined>} */
 export async function getImageById(id) {
+  if (!id) return undefined
   const db = await dbPromise
   return db.get('images', id)
 }
@@ -333,6 +386,7 @@ export async function saveAttempt(data) {
   const attempt = { id: uid(), accountId, date: Date.now(), ...data }
   await db.put('attempts', attempt)
 
+  if (!attempt.docId) return attempt
   const doc = await db.get('docs', attempt.docId)
   if (doc) {
     const patch = { attempts: (doc.attempts || 0) + 1 }
@@ -344,6 +398,7 @@ export async function saveAttempt(data) {
   return attempt
 }
 
+/** @param {string | null} docId @returns {Promise<Attempt[]>} */
 export async function listAttempts(docId = null) {
   const db = await dbPromise
   const accountId = await requireAccount()
@@ -355,6 +410,7 @@ export async function listAttempts(docId = null) {
   return all.filter(a => a.accountId === accountId).sort((a, b) => b.date - a.date)
 }
 
+/** @param {{ docId: string, sentence: string, term: string, type: string }} opts @returns {Promise<Mistake>} */
 export async function bankMistake({ docId, sentence, term, type }) {
   const db = await dbPromise
   const accountId = await requireAccount()
@@ -392,13 +448,86 @@ export async function countMistakes() {
   return all.length
 }
 
+// Aggregate the account's weakest terms across the mistake bank and the SRS
+// schedule. Returns [{ term, docId, sentence, type, weight }] sorted by weight
+// (highest first). Used by adaptive / weak-spot generation to bias questions
+// toward what the learner keeps missing.
+/** @param {string | null} accountId @param {string | null} docId @returns {Promise<WeakTerm[]>} */
+export async function getWeakTerms(accountId = null, docId = null) {
+  const acc = accountId || (await requireAccount())
+  const db = await dbPromise
+  const mistakes = (docId ? await listMistakes(docId) : await listMistakes())
+    .filter(m => m.accountId === acc)
+  const srs = (await db.getAllFromIndex('srs', 'accountId', acc))
+    .filter(r => (docId ? r.docId === docId : true))
+  const byTerm = new Map()
+  const bump = (term, docId2, sentence, type, w) => {
+    if (!term) return
+    const key = `${docId2}__${term.toLowerCase()}`
+    const cur = byTerm.get(key) || { term, docId: docId2, sentence, type, weight: 0 }
+    cur.weight += w
+    byTerm.set(key, cur)
+  }
+  for (const m of mistakes) bump(m.term, m.docId, m.sentence, m.type, 2 * (m.wrongCount || 1))
+  for (const r of srs) {
+    // lapses hurt most; low ease and items already due add weight too
+    const lapseW = (r.lapses || 0) * 2
+    const easeW = r.ease != null && r.ease < 2.5 ? 1 : 0
+    const dueW = (r.dueAt ?? 0) <= Date.now() ? 1 : 0
+    bump(r.term, r.docId, r.sentence, r.type, lapseW + easeW + dueW)
+  }
+  return [...byTerm.values()].sort((a, b) => b.weight - a.weight)
+}
+
+// ── Saved decks (shared/challenge quizzes kept in the library) ──
+
+/** @param {{ name?: string, questions: unknown[], source?: string, docId?: string | null }} opts @returns {Promise<Deck>} */
+export async function saveDeck({ name, questions, source = 'shared', docId = null }) {
+  const db = await dbPromise
+  const accountId = await requireAccount()
+  const deck = {
+    id: uid(),
+    accountId,
+    name: (name || 'Shared Quiz').trim().slice(0, 120),
+    questions: Array.isArray(questions) ? questions : [],
+    source,
+    docId,
+    createdAt: Date.now()
+  }
+  await db.put('decks', deck)
+  return deck
+}
+
+/** @param {string} id @returns {Promise<Deck | null>} */
+export async function getDeck(id) {
+  if (!id) return null
+  const db = await dbPromise
+  const deck = await db.get('decks', id)
+  if (deck && activeAccountId && deck.accountId !== activeAccountId) return null
+  return deck
+}
+
+export async function listDecks() {
+  const db = await dbPromise
+  const accountId = await requireAccount()
+  return (await db.getAllFromIndex('decks', 'accountId', accountId))
+    .sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function deleteDeck(id) {
+  const db = await dbPromise
+  await db.delete('decks', id)
+}
+
 export function srsIdFor(docId, term, sentence) {
   return mistakeId(docId, term, sentence)
 }
 
 // ── Spaced repetition (srs store) ──
 
+/** @param {{ docId: string, sentence: string, term: string, type: string }} opts @returns {Promise<SrsRecord | null>} */
 export async function upsertSrsFromMistake({ docId, sentence, term, type }) {
+  if (!docId || !term) return null
   await migrateMistakesToSrs()
   const db = await dbPromise
   const accountId = await requireAccount()
@@ -425,7 +554,9 @@ export async function upsertSrsFromMistake({ docId, sentence, term, type }) {
   return rec
 }
 
+/** @param {string} id @returns {Promise<SrsRecord | undefined>} */
 export async function getSrsItem(id) {
+  if (!id) return undefined
   await migrateMistakesToSrs()
   const db = await dbPromise
   return db.get('srs', id)
@@ -436,8 +567,8 @@ export async function listDueCards(limit = 50) {
   const db = await dbPromise
   const accountId = await requireAccount()
   const now = Date.now()
-  return (await db.getAll('srs'))
-    .filter(r => r.accountId === accountId && (r.dueAt ?? 0) <= now)
+  return (await db.getAllFromIndex('srs', 'accountId', accountId))
+    .filter(r => (r.dueAt ?? 0) <= now)
     .sort((a, b) => a.dueAt - b.dueAt)
     .slice(0, limit)
 }
@@ -447,13 +578,15 @@ export async function countDueCards() {
   const db = await dbPromise
   const accountId = await requireAccount()
   const now = Date.now()
-  return (await db.getAll('srs'))
-    .filter(r => r.accountId === accountId && (r.dueAt ?? 0) <= now)
+  return (await db.getAllFromIndex('srs', 'accountId', accountId))
+    .filter(r => (r.dueAt ?? 0) <= now)
     .length
 }
 
 // grade: 'again' | 'hard' | 'good' | 'easy'
+/** @param {string} id @param {'again'|'hard'|'good'|'easy'} grade @returns {Promise<SrsRecord | null>} */
 export async function gradeSrsItem(id, grade) {
+  if (!id) return null
   await migrateMistakesToSrs()
   const db = await dbPromise
   const item = await db.get('srs', id)
@@ -474,15 +607,17 @@ function blobToDataUrl(blob) {
   })
 }
 
+/** @returns {Promise<ExportData>} */
 export async function exportAll() {
   const db = await dbPromise
-  const [accounts, docs, attempts, mistakes, images, srs] = await Promise.all([
+  const [accounts, docs, attempts, mistakes, images, srs, decks] = await Promise.all([
     db.getAll('accounts'),
     db.getAll('docs'),
     db.getAll('attempts'),
     db.getAll('mistakes'),
     db.getAll('images'),
-    db.getAll('srs')
+    db.getAll('srs'),
+    db.getAll('decks')
   ])
   saveSettings({ lastBackupAt: Date.now() })
   // embed slide images as data urls so restores are complete (backup v3)
@@ -502,7 +637,7 @@ export async function exportAll() {
     imageRecords.push(rec)
   }
   return {
-    app: 'quizforge',
+    app: 'quizard',
     version: 3,
     exportedAt: new Date().toISOString(),
     accounts,
@@ -511,14 +646,16 @@ export async function exportAll() {
     mistakes,
     imageRecords,
     srs,
+    decks,
     settings: loadSettings()
   }
 }
 
+/** @param {ExportData} data @param {'merge'|'replace'} mode @returns {Promise<{ added: number, docs: number, attempts: number }>} */
 export async function importAll(data, mode = 'merge') {
   const db = await dbPromise
-  if (data?.app !== 'quizforge' || !Array.isArray(data.docs)) {
-    throw new Error('Not a valid QuizForge backup file.')
+  if (data?.app !== 'quizard' || !Array.isArray(data.docs)) {
+    throw new Error('Not a valid Quizard backup file.')
   }
   await ensureDefaultAccount()
 
@@ -534,13 +671,14 @@ export async function importAll(data, mode = 'merge') {
     decodedImages.push({ rec, blob })
   }
 
-  const tx = db.transaction(['accounts', 'docs', 'attempts', 'mistakes', 'images'], 'readwrite')
+  const tx = db.transaction(['accounts', 'docs', 'attempts', 'mistakes', 'images', 'decks'], 'readwrite')
   if (mode === 'replace') {
     tx.objectStore('accounts').clear()
     tx.objectStore('docs').clear()
     tx.objectStore('attempts').clear()
     tx.objectStore('mistakes').clear()
     tx.objectStore('images').clear()
+    tx.objectStore('decks').clear()
   }
   let added = 0
   const putUnique = async (storeName, items) => {
@@ -558,6 +696,7 @@ export async function importAll(data, mode = 'merge') {
   await putUnique('attempts', data.attempts || [])
   await putUnique('mistakes', data.mistakes || [])
   await putUnique('srs', data.srs || [])
+  await putUnique('decks', data.decks || [])
   for (const { rec, blob } of decodedImages) {
     if (mode === 'merge') {
       const exists = await tx.objectStore('images').get(rec.id)
@@ -589,16 +728,17 @@ export async function importAll(data, mode = 'merge') {
 
 export async function clearAllData() {
   const db = await dbPromise
-  const tx = db.transaction(['accounts', 'docs', 'attempts', 'mistakes', 'images', 'srs'], 'readwrite')
+  const tx = db.transaction(['accounts', 'docs', 'attempts', 'mistakes', 'images', 'srs', 'decks'], 'readwrite')
   tx.objectStore('accounts').clear()
   tx.objectStore('docs').clear()
   tx.objectStore('attempts').clear()
   tx.objectStore('mistakes').clear()
   tx.objectStore('images').clear()
   tx.objectStore('srs').clear()
+  tx.objectStore('decks').clear()
   await tx.done
-  localStorage.removeItem('quizforge-settings')
-  localStorage.removeItem('quizforge-active-account')
+  localStorage.removeItem('quizard-settings')
+  localStorage.removeItem('quizard-active-account')
   activeAccountId = null
 }
 
@@ -608,7 +748,7 @@ export async function storageUsage() {
   return { usage, quota }
 }
 
-const SETTINGS_KEY = 'quizforge-settings'
+const SETTINGS_KEY = 'quizard-settings'
 
 export function loadSettings() {
   try {
@@ -618,6 +758,7 @@ export function loadSettings() {
   }
 }
 
+/** @param {import('./db-types.js').AppSettings} patch @returns {import('./db-types.js').AppSettings} */
 export function saveSettings(patch) {
   const merged = { ...loadSettings(), ...patch }
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged))

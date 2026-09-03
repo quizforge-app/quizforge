@@ -1,6 +1,5 @@
-import mammoth from 'mammoth'
-
 export async function extractDocx(file) {
+  const mammoth = (await import('mammoth')).default
   const buf = await file.arrayBuffer()
   const result = await mammoth.extractRawText({ arrayBuffer: buf })
   const text = result.value || ''

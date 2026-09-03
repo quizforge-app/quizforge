@@ -1,19 +1,71 @@
-import { sentences, words, termFreq, keyTerms, scoreSentences, stripHeadings, mulberry32, shuffleArr } from './textproc.js'
-import { detectTopics } from './topics.js'
+/**
+ * @typedef {Object} DocMeta - Document metadata (from storage)
+ * @property {string} id
+ * @property {string} name
+ * @property {string} text
+ * @property {string} [folder]
+ * @property {string[]} [tags]
+ */
 
+/**
+ * @typedef {Object} QuizConfig
+ * @property {number} count - Number of questions to generate
+ * @property {{ mcq?: boolean, tf?: boolean, fib?: boolean, id?: boolean, matching?: boolean, ordering?: boolean, short?: boolean }} mix - Enabled question types
+ * @property {'easy' | 'medium' | 'hard'} difficulty
+ * @property {boolean} shuffle - Whether to shuffle final questions
+ * @property {number} [timerSec] - Timer in seconds (0 = off)
+ * @property {boolean} [fresh] - Prefer unused sentences
+ * @property {string[]} [topics] - Topic filter
+ * @property {number} [fixedSeed] - Deterministic seed
+ * @property {boolean} [focusWeak] - Bias toward weak terms
+ * @property {Array<{term: string}>} [weakTerms] - Weak terms for biasing
+ */
+
+/**
+ * @typedef {Object} QuizQuestion
+ * @property {'mcq' | 'tf' | 'fib' | 'id' | 'matching' | 'ordering' | 'short'} type
+ * @property {string} [stem] - Question stem (mcq, fib)
+ * @property {string} [statement] - Statement for TF questions
+ * @property {string} [clue] - Clue for ID questions
+ * @property {string} [prompt] - Prompt for short/matching/ordering
+ * @property {string[]} [options] - MCQ options
+ * @property {string[]} [choices] - FIB choices
+ * @property {number} [answerIndex] - Correct option index (mcq, fib)
+ * @property {boolean} [answer] - TF answer
+ * @property {string} [answer] - ID/short answer
+ * @property {{ sentence: string, term: string, docId?: string }} [meta]
+ */
+
+/**
+ * @typedef {Object} QuizResult
+ * @property {QuizQuestion[]} questions
+ * @property {number} seed
+ * @property {'partial' | 'not_enough_content' | 'no_types' | null} error
+ */
+
+import { sentences, termFreq, keyTerms, scoreSentences, stripHeadings, mulberry32, shuffleArr } from './textproc.js'
+import { detectTopics } from './topics.js'
+import { pickDistractors as pickImprovedDistractors, buildCooccurrence, buildMcqStem, buildShortPrompt, formatOption } from './questionForms.js'
+
+/**
+ * Build MCQ/ID questions from previously banked mistakes.
+ * @param {Array<{docId: string, sentence: string, term: string, type: string}>} mistakes
+ * @param {Map<string, Array<{term: string, freq: number}>>} docTerms - Per-doc term map
+ * @returns {QuizQuestion[]}
+ */
 export function buildMistakeQuestions(mistakes, docTerms) {
   const rng = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
   return mistakes.map(m => {
     const pool = (docTerms.get(m.docId) || []).filter(t => t.term !== m.term.toLowerCase())
     if (pool.length >= 3) {
-      const distractors = pickDistractors({ term: m.term }, pool, rng, 3)
+      const distractors = pickImprovedDistractors({ term: m.term, proper: false, phrase: false }, pool, rng, 3)
       if (distractors.length === 3) {
-        const options = shuffleArr([m.term, ...distractors], rng)
+        const options = shuffleArr([m.term, ...distractors], rng).map(formatOption)
         return {
           type: 'mcq',
           stem: blankTerm(m.sentence, m.term),
           options,
-          answerIndex: options.indexOf(m.term),
+          answerIndex: options.findIndex(o => o.toLowerCase() === m.term.toLowerCase()),
           meta: { sentence: m.sentence, term: m.term, docId: m.docId }
         }
       }
@@ -21,7 +73,7 @@ export function buildMistakeQuestions(mistakes, docTerms) {
     const re = new RegExp(m.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
     return {
       type: 'id',
-      clue: m.sentence.replace(re, '………'),
+      clue: m.sentence.replace(re, '\u2026\u2026\u2026'),
       answer: m.term,
       meta: { sentence: m.sentence, term: m.term, docId: m.docId }
     }
@@ -32,7 +84,10 @@ export const TYPE_META = {
   mcq: { name: 'Multiple Choice', short: 'MCQ' },
   tf: { name: 'True or False', short: 'T/F' },
   fib: { name: 'Fill the Blank', short: 'Blank' },
-  id: { name: 'Identification', short: 'Identify' }
+  id: { name: 'Identification', short: 'Identify' },
+  matching: { name: 'Matching', short: 'Match' },
+  ordering: { name: 'Ordering', short: 'Order' },
+  short: { name: 'Short Answer', short: 'Short' }
 }
 
 const DIFFICULTY = {
@@ -46,9 +101,8 @@ function findTermInSentence(sentence, terms) {
   for (const t of terms) {
     const needle = t.phrase ? t.term : ` ${t.term} `
     if (lower.includes(t.phrase ? t.term : needle)) {
-      const idx = sentence.toLowerCase().indexOf(t.term)
       const re = new RegExp(t.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
-      if (idx !== -1 && re.test(sentence)) return t
+      if (re.test(sentence)) return t
     }
   }
   return null
@@ -57,26 +111,6 @@ function findTermInSentence(sentence, terms) {
 function blankTerm(sentence, term) {
   const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
   return sentence.replace(re, '\u0000BLANK\u0000')
-}
-
-function pickDistractors(term, terms, rng, count = 3) {
-  const shape = term.term.split(/[\s-]+/).length
-  const len = term.term.length
-  const sameShape = terms.filter(t => {
-    if (t.term === term.term) return false
-    const a = t.term.split(/[\s-]+/).length
-    return a === shape || Math.abs(a - shape) <= 1
-  })
-  sameShape.sort((a, b) => Math.abs(a.term.length - len) - Math.abs(b.term.length - len))
-  const pool = sameShape.length >= count ? sameShape : terms.filter(t => t.term !== term.term)
-  if (!pool.length) return []
-  const out = []
-  const bag = shuffleArr(pool, rng)
-  for (const cand of bag) {
-    if (out.length >= count) break
-    if (cand.term !== term.term && !out.some(o => o.term === cand.term)) out.push(cand)
-  }
-  return out.map(d => d.term)
 }
 
 function tweakNumbers(sentence, rng) {
@@ -106,18 +140,28 @@ function allocateCounts(enabledTypes, total) {
   return counts
 }
 
+/**
+ * Estimate how many questions can be generated from a document.
+ * @param {DocMeta} doc
+ * @param {QuizConfig} config
+ * @returns {number}
+ */
 export function estimateAvailable(doc, config) {
   const probe = { ...config, count: 999 }
   const gen = generateQuiz(doc, probe)
   return gen.questions.length
 }
 
+/**
+ * Generate a quiz from a document's text.
+ * @param {DocMeta} doc
+ * @param {QuizConfig} config
+ * @returns {QuizResult}
+ */
 export function generateQuiz(doc, config) {
   const seed = config.fixedSeed != null ? config.fixedSeed : (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0
   const rng = mulberry32(seed ^ require_hash(doc.id))
 
-  // strip heading/title lines BEFORE any term or sentence analysis so
-  // questions can never be built from document titles
   const text = stripHeadings(doc.text)
   const sents = sentences(text)
   const tf = termFreq(text)
@@ -136,6 +180,17 @@ export function generateQuiz(doc, config) {
   const poolSize = Math.min(ranked.length, Math.max(config.count * 3, 30))
   let sentPool = ranked.slice(0, poolSize)
 
+  if (config.focusWeak && Array.isArray(config.weakTerms) && config.weakTerms.length) {
+    const weakSet = new Set(config.weakTerms.map(w => String(w.term || w).toLowerCase()))
+    sentPool = sentPool.slice().sort((a, b) => {
+      const aw = weakSet.has(termIn(weakSet, a.text)) ? 0 : 1
+      const bw = weakSet.has(termIn(weakSet, b.text)) ? 0 : 1
+      return aw - bw
+    })
+  }
+
+  const cooccur = buildCooccurrence(ranked.map(s => s.text), terms)
+
   if (Array.isArray(config.topics) && config.topics.length) {
     const { membership } = detectTopics(text)
     const wanted = new Set(config.topics.map(t => t.toLowerCase()))
@@ -149,7 +204,7 @@ export function generateQuiz(doc, config) {
       const scopedTerms = keyTerms(scoped.map(s => s.text).join(' '))
       terms.length = 0
       terms.push(...scopedTerms)
-      for (const k of Object.keys(tf)) delete tf[k]
+      tf.clear()
       for (const [k, v] of scopedTf) tf.set(k, v)
     }
   }
@@ -182,9 +237,19 @@ export function generateQuiz(doc, config) {
 
   for (const type of typeOrder) {
     if (questions.length >= config.count) break
+    if (type === 'matching') {
+      const q = buildMatchingSet(rng, terms, tierTerms, sentPool, usedSentences, usedTerms, config)
+      if (q) questions.push(q)
+      continue
+    }
+    if (type === 'ordering') {
+      const q = buildOrderingSet(rng, sentPool, usedSentences, terms)
+      if (q) questions.push(q)
+      continue
+    }
     const cand = takeCandidate()
     if (!cand) break
-    const q = buildQuestion(type, cand, terms, tierTerms, rng)
+    const q = buildQuestion(type, cand, terms, tierTerms, rng, { cooccur })
     if (!q) continue
     usedTerms.add(cand.term.term)
     q.meta = { sentence: cand.text, term: cand.term.term }
@@ -201,24 +266,28 @@ export function generateQuiz(doc, config) {
   }
 }
 
-function buildQuestion(type, cand, allTerms, tierTerms, rng) {
+function buildQuestion(type, cand, allTerms, tierTerms, rng, opts = {}) {
   const term = cand.term
+  const cooccur = opts.cooccur
+  const combinedTerms = allTerms.concat(tierTerms.filter(t => !allTerms.includes(t)))
+
   switch (type) {
     case 'mcq': {
-      const distractors = pickDistractors(term, allTerms.concat(tierTerms.filter(t => !allTerms.includes(t))), rng, 3)
+      const distractors = pickImprovedDistractors(term, combinedTerms, rng, 3, {
+        avoidSentence: cand.text,
+        cooccur
+      })
       if (distractors.length < 3) return null
-      const options = shuffleArr([term.term, ...distractors], rng)
-      return {
-        type,
-        stem: blankTerm(cand.text, term.term),
-        options,
-        answerIndex: options.indexOf(term.term)
-      }
+      const options = shuffleArr([term.term, ...distractors], rng).map(formatOption)
+      const answerIdx = options.findIndex(o => o.toLowerCase() === term.term.toLowerCase())
+      if (answerIdx === -1) return null
+      const { stem } = buildMcqStem(cand.text, term.term)
+      return { type, stem, options, answerIndex: answerIdx }
     }
     case 'tf': {
       const makeFalse = rng() < 0.55
       if (makeFalse) {
-        const swapped = swapWithDistractor(cand.text, term, allTerms, rng)
+        const swapped = swapWithDistractor(cand.text, term, combinedTerms, rng)
         if (swapped) return { type, statement: swapped, answer: false }
         const tweaked = tweakNumbers(cand.text, rng)
         if (tweaked) return { type, statement: tweaked, answer: false }
@@ -226,17 +295,83 @@ function buildQuestion(type, cand, allTerms, tierTerms, rng) {
       return { type, statement: cand.text, answer: true }
     }
     case 'fib': {
-      const distractors = pickDistractors(term, allTerms, rng, 3)
+      const distractors = pickImprovedDistractors(term, combinedTerms, rng, 3, {
+        avoidSentence: cand.text,
+        cooccur
+      })
       if (distractors.length < 3) return null
-      const choices = shuffleArr([term.term, ...distractors], rng)
-      return { type, stem: blankTerm(cand.text, term.term), choices, answerIndex: choices.indexOf(term.term) }
+      const choices = shuffleArr([term.term, ...distractors], rng).map(formatOption)
+      const answerIdx = choices.findIndex(c => c.toLowerCase() === term.term.toLowerCase())
+      if (answerIdx === -1) return null
+      return { type, stem: blankTerm(cand.text, term.term), choices, answerIndex: answerIdx }
     }
     case 'id': {
-      return { type, clue: cand.text.replace(new RegExp(term.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '………'), answer: term.term }
+      const re = new RegExp(term.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      return { type, clue: cand.text.replace(re, '\u2026\u2026\u2026'), answer: term.term }
+    }
+    case 'short': {
+      const prompt = buildShortPrompt(cand.text, term.term)
+      return {
+        type,
+        prompt,
+        answer: term.term,
+        meta: { sentence: cand.text, term: term.term }
+      }
     }
     default:
       return null
   }
+}
+
+function termIn(weakSet, text) {
+  const lower = ' ' + text.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ') + ' '
+  for (const w of weakSet) {
+    if (lower.includes(w.length > 2 && !/\s/.test(w) ? ` ${w} ` : w)) return w
+  }
+  return ''
+}
+
+function buildMatchingSet(rng, allTerms, tierTerms, sentPool, usedSentences, usedTerms, config) {
+  const pairCount = Math.max(3, Math.min(6, Math.round(config.count / 2)))
+  const pairs = []
+  for (const s of sentPool) {
+    if (pairs.length >= pairCount) break
+    if (usedSentences.has(s.text)) continue
+    const term = findTermInSentence(s.text, allTerms.filter(t => !usedTerms.has(t.term)).concat(tierTerms))
+    if (!term) continue
+    usedSentences.add(s.text)
+    usedTerms.add(term.term)
+    pairs.push({ left: titleCase(term.term), right: s.text })
+  }
+  if (pairs.length < 3) return null
+  const rightOrder = shuffleArr(pairs.map((_, i) => i), rng)
+  return { type: 'matching', prompt: 'Match each term to the sentence that defines it', pairs, rightOrder }
+}
+
+function splitOrderedParts(text) {
+  const cleaned = text.replace(/\s+/g, ' ').trim()
+  let raw = cleaned.split(/;\s*/)
+  if (raw.length < 3) raw = cleaned.split(/,\s*/)
+  if (raw.length < 3) raw = cleaned.split(/\s+and\s+/i)
+  const parts = raw.map(p => p.trim()).filter(p => p.split(/\s+/).length >= 2)
+  if (parts.length < 3 || parts.length > 6) return null
+  return parts
+}
+
+function buildOrderingSet(rng, sentPool, usedSentences, terms) {
+  for (const s of sentPool) {
+    if (usedSentences.has(s.text)) continue
+    const parts = splitOrderedParts(s.text)
+    if (!parts) continue
+    usedSentences.add(s.text)
+    const shuffled = shuffleArr(parts.map((_, i) => i), rng)
+    return { type: 'ordering', prompt: 'Put the steps in the correct order', steps: parts, shuffled }
+  }
+  return null
+}
+
+function titleCase(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function matchCase(replacement, original) {
@@ -249,8 +384,9 @@ function matchCase(replacement, original) {
 function swapWithDistractor(sentence, term, allTerms, rng) {
   if (!term.proper && !term.phrase) return null
   const properPool = allTerms.filter(t => t.proper || t.phrase)
-  const distractors = pickDistractors(term, properPool.length >= 4 ? properPool : allTerms, rng, 4)
-  const usable = distractors.find(d => !sentence.toLowerCase().includes(d))
+  const pool = properPool.length >= 4 ? properPool : allTerms
+  const distractors = pickImprovedDistractors(term, pool, rng, 4)
+  const usable = distractors.find(d => !sentence.toLowerCase().includes(d.toLowerCase()))
   if (!usable) return null
   const re = new RegExp(term.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
   if (!re.test(sentence)) return null

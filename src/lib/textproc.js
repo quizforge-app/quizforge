@@ -15,6 +15,11 @@ const TERMINAL = /[.!?…]["')\]]?$/
 
 // True when a raw line looks like a heading/title rather than body prose.
 // Lines ending in sentence punctuation are never treated as titles.
+/**
+ * Check whether a raw text line looks like a heading/title.
+ * @param {string} line - A single text line
+ * @returns {boolean}
+ */
 export function isTitleLike(line) {
   const t = String(line).trim()
   if (!t || t.length > 90) return false
@@ -40,6 +45,11 @@ export function isTitleLike(line) {
 }
 
 // Remove heading-like lines from extracted text before any NLP runs.
+/**
+ * Remove heading-like lines from extracted text.
+ * @param {string} text - Full document text
+ * @returns {string}
+ */
 export function stripHeadings(text) {
   return String(text).split(/\n+/)
     .filter(line => { const l = line.trim(); return !l || !isTitleLike(l) })
@@ -48,6 +58,11 @@ export function stripHeadings(text) {
 
 // Collect the heading lines that were removed (used to reject AI output
 // that still references them).
+/**
+ * Extract heading lines that were removed by stripHeadings.
+ * @param {string} text - Full document text
+ * @returns {string[]}
+ */
 export function extractTitleLines(text) {
   const out = []
   const seen = new Set()
@@ -61,6 +76,11 @@ export function extractTitleLines(text) {
   return out
 }
 
+/**
+ * Split text into sentences, filtering out very short/long ones.
+ * @param {string} text - Document text
+ * @returns {string[]}
+ */
 export function sentences(text) {
   const cleaned = stripHeadings(text)
   const protectedText = cleaned.replace(ABBREVS, m => m.replace(/\./g, '\u0001'))
@@ -74,20 +94,40 @@ export function sentences(text) {
     })
 }
 
+/**
+ * Extract non-stopword words from a string.
+ * @param {string} s
+ * @returns {string[]}
+ */
 export function words(s) {
   return (s.toLowerCase().match(/[a-z][a-z'’-]{1,}/g) || []).filter(w => !STOPWORDS.has(w))
 }
 
+/**
+ * Extract all word tokens (including stopwords) from text.
+ * @param {string} text
+ * @returns {string[]}
+ */
 export function allTokens(text) {
   return text.toLowerCase().match(/[a-z][a-z'’-]+/g) || []
 }
 
+/**
+ * Build a term frequency map from text.
+ * @param {string} text
+ * @returns {Map<string, number>}
+ */
 export function termFreq(text) {
   const freq = new Map()
   for (const w of words(text)) freq.set(w, (freq.get(w) || 0) + 1)
   return freq
 }
 
+/**
+ * Extract ranked key terms from text (single words + capitalised phrases).
+ * @param {string} text
+ * @returns {Array<{term: string, freq: number, phrase?: boolean, proper?: boolean}>}
+ */
 export function keyTerms(text) {
   const freq = termFreq(text)
   let ranked = [...freq.entries()]
@@ -144,6 +184,12 @@ export function keyTerms(text) {
   return ranked.slice(0, 120)
 }
 
+/**
+ * Score sentences by relevance using term frequency.
+ * @param {string[]} sents - Sentence array
+ * @param {Map<string, number>} tfMap - Term frequency map
+ * @returns {Array<{text: string, score: number}>}
+ */
 export function scoreSentences(sents, tfMap) {
   return sents.map(s => {
     const w = s.split(/\s+/)
@@ -160,6 +206,11 @@ export function scoreSentences(sents, tfMap) {
   }).sort((a, b) => b.score - a.score)
 }
 
+/**
+ * FNV-1a hash of a string, returned as unsigned 32-bit int.
+ * @param {string} str
+ * @returns {number}
+ */
 export function hashString(str) {
   let h = 2166136261 >>> 0
   for (let i = 0; i < str.length; i++) {
@@ -169,6 +220,11 @@ export function hashString(str) {
   return h >>> 0
 }
 
+/**
+ * Mulberry32 seeded PRNG — returns a function that produces [0,1) floats.
+ * @param {number} seed
+ * @returns {() => number}
+ */
 export function mulberry32(seed) {
   let a = seed >>> 0
   return function () {
@@ -180,6 +236,13 @@ export function mulberry32(seed) {
   }
 }
 
+/**
+ * Fisher-Yates shuffle using a seeded RNG.
+ * @template T
+ * @param {T[]} arr
+ * @param {() => number} rng - Seeded random [0,1)
+ * @returns {T[]}
+ */
 export function shuffleArr(arr, rng) {
   const a = arr.slice()
   for (let i = a.length - 1; i > 0; i--) {
@@ -204,15 +267,44 @@ function levenshtein(a, b) {
   return prev[n]
 }
 
+/**
+ * Normalize text for fuzzy comparison: lowercase, strip punctuation, collapse whitespace.
+ * @param {string} s
+ * @returns {string}
+ */
 export function normalizeText(s) {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Check whether user input matches an accepted answer (fuzzy).
+ * @param {string} input - User's typed answer
+ * @param {string} answer - Expected answer
+ * @returns {boolean}
+ */
 export function checkTyped(input, answer) {
   const a = normalizeText(input)
   const b = normalizeText(answer)
   if (!a) return false
   if (a === b) return true
-  const tol = b.length > 8 ? 2 : b.length > 4 ? 1 : 0
-  return levenshtein(a, b) <= tol
+  // Numeric answers (years, counts, codes) must match exactly to avoid false
+  // accepts (e.g. "2" vs "3"). Very short non-numeric answers (<=2 chars, e.g.
+  // single letters) also require an exact match. Everything longer is graded
+  // fuzzily below.
+  if (/^\d+$/.test(b)) return false
+  if (b.length <= 2) return false
+
+  const aTok = a.split(' ').filter(Boolean)
+  const bTok = b.split(' ').filter(Boolean)
+  if (bTok.length && aTok.length) {
+    const tokClose = (x, y) => x === y || levenshtein(x, y) <= Math.max(1, Math.floor(x.length * 0.2))
+    const allMatch = bTok.every(bt => aTok.some(at => tokClose(bt, at)))
+    // accept when every answer token is close to some input token and the
+    // input isn't padded with many extra words (handles plurals/extra words/typos)
+    if (allMatch && aTok.length <= bTok.length + 3) return true
+  }
+
+  const maxLen = Math.max(a.length, b.length)
+  if (maxLen && levenshtein(a, b) / maxLen <= 0.25) return true
+  return false
 }

@@ -1,9 +1,15 @@
-import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+let pdfjsLib = null
+let workerSet = false
 
 export async function extractPdf(file) {
+  // Lazily load pdf.js only when a PDF is actually imported (keeps it out of
+  // the initial bundle so the app starts fast).
+  if (!pdfjsLib) {
+    pdfjsLib = await import('pdfjs-dist')
+    const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+    workerSet = true
+  }
   const buf = await file.arrayBuffer()
   const loadingTask = pdfjsLib.getDocument({
     data: buf,
