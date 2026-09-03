@@ -41,3 +41,48 @@ export function esc(s) {
 export function blankHtml(stem) {
   return esc(stem).replace(/\u0000BLANK\u0000/g, '<span class="blank-slot">&nbsp;</span>')
 }
+
+/* ── Component helpers ── */
+
+export function card(content, { style = '', cls = '' } = {}) {
+  return `<div class="card ${cls}"${style ? ` style="${style}"` : ''}>${content}</div>`
+}
+
+export function statsRow(stats) {
+  return `<div class="stats-row">${stats.map(s =>
+    `<div class="stat"><div class="num">${s.value}</div><div class="lbl">${s.label}</div></div>`
+  ).join('')}</div>`
+}
+
+export function chipRow(chips) {
+  return `<div class="chip-row">${chips.join('')}</div>`
+}
+
+export function chip(label, { active = false, count = null, cls = '' } = {}) {
+  const extra = count != null ? ` <span class="chip-count">${count}</span>` : ''
+  return `<span class="chip ${active ? 'on' : ''} ${cls}">${label}${extra}</span>`
+}
+
+export function sectionTitle(text) {
+  return `<div class="section-title">${text}</div>`
+}
+
+export function row(content, { tooltip = '', style = '', borderless = false } = {}) {
+  const s = borderless ? `${style};border-bottom:none`.replace(/^;/, '') : style
+  const tip = tooltip ? ` data-tooltip="${tooltip}"` : ''
+  const sty = s ? ` style="${s}"` : ''
+  return `<div class="row"${tip}${sty}>${content}</div>`
+}
+
+export function muted(text, { style = '', tag = 'p' } = {}) {
+  const sty = style ? ` style="${style}"` : ''
+  return `<${tag} class="muted"${sty}>${text}</${tag}>`
+}
+
+export function btn(label, { icon: iconName = null, cls = 'btn-primary', style = '', tooltip = '', id = '', attrs = '' } = {}) {
+  const ico = iconName ? icon(iconName) : ''
+  const tip = tooltip ? ` data-tooltip="${tooltip}"` : ''
+  const sty = style ? ` style="${style}"` : ''
+  const idAttr = id ? ` id="${id}"` : ''
+  return `<button class="btn ${cls}"${idAttr}${tip}${sty}${attrs ? ' ' + attrs : ''}>${ico}${label}</button>`
+}
