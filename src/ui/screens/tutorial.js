@@ -115,7 +115,7 @@ function cacheAudio(name) {
   audioCache.set(name, a)
 }
 
-function preloadAround(idx) {
+function preloadAudioAround(idx) {
   cacheAudio(SLIDES[idx].mp3)
   if (SLIDES[idx + 1]) cacheAudio(SLIDES[idx + 1].mp3)
 }
@@ -175,7 +175,7 @@ function iconBack() {
 
 export function render(root, ctx) {
   let idx = 0
-  preloadAround(0)
+  preloadAudioAround(0)
   setupAudioUnlock()
 
   // Resume quiz state from the same session
@@ -257,7 +257,7 @@ export function render(root, ctx) {
       img.removeAttribute('data-src')
     }
   }
-  function preloadAround() {
+  function loadImagesAround() {
     loadSlideImage(idx)
     if (idx + 1 < SLIDES.length) loadSlideImage(idx + 1)
   }
@@ -276,7 +276,7 @@ export function render(root, ctx) {
     slidesEl.style.transform = `translateX(-${idx * 100}%)`
     // replay the active slide's entrance choreography
     ;[...slidesEl.children].forEach((el, i) => el.classList.toggle('active', i === idx))
-    preloadAround()
+    loadImagesAround()
     dots.forEach((d, i) => d.classList.toggle('on', i === idx))
     const isLast = idx === SLIDES.length - 1
     nextLabel.textContent = isLast ? 'Get Started' : 'Continue'
@@ -287,7 +287,7 @@ export function render(root, ctx) {
     progressEl.setAttribute('aria-valuenow', String(idx + 1))
     // Play voice for this slide
     stopAudio()
-    preloadAround(idx)
+    preloadAudioAround(idx)
     setTimeout(() => playAudio(SLIDES[idx].mp3), 200)
   }
 
