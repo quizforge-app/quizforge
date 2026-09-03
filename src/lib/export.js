@@ -88,6 +88,88 @@ export function exportSummary(doc) {
   download(`quizard-summary-${slug(doc.name)}.md`, buildSummaryMarkdown(doc))
 }
 
+/* Real PDF handout: same structure as the reviewer screen, generated with
+   jsPDF (lazy-loaded so it never sits in the main bundle). */
+export async function exportPdfHandout(doc, extras = {}) {
+  const { jsPDF } = await import('jspdf')
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+  const W = 595.28, H = 841.89, M = 56
+  const maxW = W - M * 2
+  let y = 0
+
+  const page = () => { pdf.addPage(); y = M }
+  const need = h => { if (y + h > H - M) page() }
+  const text = (str, { size = 11, bold = false, color = '#1c2438', gap = 6, indent = 0 } = {}) => {
+    pdf.setFont('helvetica', bold ? 'bold' : 'normal')
+    pdf.setFontSize(size)
+    pdf.setTextColor(color)
+    const lines = pdf.splitTextToSize(str, maxW - indent)
+    need(lines.length * (size + 3))
+    lines.forEach(line => { pdf.text(line, M + indent, y + size); y += size + 3 })
+    y += gap
+  }
+  const rule = () => { need(14); pdf.setDrawColor('#d9d2f2'); pdf.line(M, y + 6, W - M, y + 6); y += 14 }
+
+  // title block
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor('#7c3aed')
+  pdf.text('S T U D Y   R E V I E W E R', M, M + 8)
+  y = M + 26
+  text(doc.name, { size: 20, bold: true, gap: 2 })
+  text(`${doc.wordCount.toLocaleString()} words · forged from your document · ${stamp()}`, { size: 9, color: '#868ea8', gap: 10 })
+  rule()
+
+  // I. overview
+  const summary = summarizeDoc(doc.text)
+  if (summary.tldr.length) {
+    text('I. Overview', { size: 13, bold: true, color: '#5b3df5' })
+    summary.tldr.forEach(p => text(p, { size: 11 }))
+  }
+
+  // II. key terms
+  if (extras.keyTermDefs?.length) {
+    rule()
+    text('II. Key Terms & Definitions', { size: 13, bold: true, color: '#5b3df5' })
+    for (const t of extras.keyTermDefs) {
+      text(t.term, { size: 11, bold: true, color: '#5b3df5', gap: 1 })
+      text(t.def, { size: 10.5, color: '#475069', indent: 12, gap: 8 })
+    }
+  }
+
+  // III. section notes
+  if (summary.sections.length) {
+    rule()
+    text('III. Section Notes', { size: 13, bold: true, color: '#5b3df5' })
+    summary.sections.forEach((sec, i) => {
+      need(30)
+      text(`${String(i + 1).padStart(2, '0')}  ${sec.title}`, { size: 11.5, bold: true, gap: 3 })
+      sec.points.forEach(p => text('•  ' + p, { size: 10.5, color: '#475069', indent: 10, gap: 2 }))
+      y += 4
+    })
+  }
+
+  // IV. self-test
+  if (extras.reviewQs?.length) {
+    rule()
+    text('IV. Test Yourself', { size: 13, bold: true, color: '#5b3df5' })
+    extras.reviewQs.forEach((q, i) => {
+      need(40)
+      const qText = q.type === 'mcq' ? q.stem : `Identify the term: ${q.clue}`
+      text(`${i + 1}. ${qText}`, { size: 10.5, bold: true, gap: 2 })
+      if (q.type === 'mcq' && q.options) {
+        q.options.forEach((o, oi) => text(`${'ABCDEFGH'[oi]}. ${o}`, { size: 10, color: '#475069', indent: 12, gap: 1 }))
+      }
+      const ans = q.type === 'mcq' ? q.options?.[q.answerIndex] : q.answer
+      text(`Answer: ${ans}`, { size: 10, bold: true, color: '#0f9d6a', indent: 12, gap: 8 })
+    })
+  }
+
+  rule()
+  text(`Generated ${stamp()} · exported from Quizard`, { size: 9, color: '#868ea8' })
+
+  pdf.save(`quizard-reviewer-${slug(doc.name)}.pdf`)
+  return true
+}
+
 export function exportQuiz(docName, lastResult) {
   if (!lastResult?.questions?.length) return false
   download(`quizard-quiz-${slug(docName)}.md`, buildQuizMarkdown(docName, lastResult.questions, lastResult.review))

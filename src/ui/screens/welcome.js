@@ -21,7 +21,7 @@ export function render(root, ctx) {
           <span class="wm-rune"></span>
           <span class="wm-rune r2"></span>
           <span class="wm-circle"></span>
-          <span class="wm-icon"><img class="wiz-hero" src="/wizard/wizard-welcome.png" alt="Quizard wizard"></span>
+          <span class="wm-icon"><img class="wiz-hero" src="/wizard/wizard-welcome.jpg" alt="Quizard wizard"></span>
           <span class="wm-sparks" aria-hidden="true">${SPARKS}</span>
         </div>
         <h1 class="welcome-title">

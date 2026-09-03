@@ -376,13 +376,22 @@ async function bootFlow() {
 // PIN-locked or multi-profile hand-off routes to the accounts screen first.
 function resolveLanding(accounts, savedId, onlyDefault) {
   const saved = savedId ? accounts.find(a => a.id === savedId) : null
+  // Full onboarding slides play once (first launch / Replay introduction).
+  // Returning users get splash → library; skip-intro setting drops the splash.
   const settled = !onlyDefault && (saved || accounts.length > 1 || accounts[0]?.pinHash)
-  const home = settings.skipIntro && settled ? 'library' : 'onboarding'
+  let home = (!settings.onboarded || !settled) ? 'onboarding' : 'library'
+
+  // Per-account tutorial: a profile created but not yet taken through the
+  // tutorial resumes it on the next launch (=== false is explicit "not done";
+  // undefined = legacy account, leave them where they are).
+  const needsTutorial = aid => settings.tutorialDoneAccounts?.[aid] === false
+
   if (onlyDefault || (!saved && accounts.length === 1 && !accounts[0].pinHash)) {
     setActiveAccount(accounts[0].id)
     state.account = accounts[0]
     window.__quizAccountId = accounts[0].id
     const askResume = !!detectResumeBanner(accounts[0].id)
+    if (home === 'library' && needsTutorial(accounts[0].id)) home = 'tutorial'
     return { screen: home, askResume }
   }
   if (!saved) {
@@ -395,6 +404,7 @@ function resolveLanding(accounts, savedId, onlyDefault) {
   state.account = saved
   window.__quizAccountId = saved.id
   const askResume = !!detectResumeBanner(saved.id)
+  if (home === 'library' && needsTutorial(saved.id)) home = 'tutorial'
   return { screen: home, askResume }
 }
 

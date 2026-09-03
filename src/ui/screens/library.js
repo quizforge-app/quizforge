@@ -51,7 +51,7 @@ export async function render(root, ctx) {
   if (docs.length) {
     html += `
       <div class="hero lib-hero">
-        <img class="lib-wiz" src="/wizard/wizard-studying.png" alt="" />
+        <img class="lib-wiz" src="/wizard/wizard-studying.jpg" alt="" />
         <div>
           <h1>Your library</h1>
           <p>${subtitle}</p>

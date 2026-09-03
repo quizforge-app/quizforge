@@ -1,4 +1,4 @@
-import { listAccounts, createAccount, hashPin, verifyPin, setActiveAccount, getAccount, deleteAccount, accountHasData, updateAccount, saveSettings } from '../../lib/storage.js'
+import { listAccounts, createAccount, hashPin, verifyPin, setActiveAccount, getAccount, deleteAccount, accountHasData, updateAccount, saveSettings, loadSettings } from '../../lib/storage.js'
 import { icon } from '../icons.js'
 import { esc } from '../helpers.js'
 
@@ -143,7 +143,10 @@ function renderCreate(root, ctx) {
 
     setActiveAccount(acc.id)
     ctx.state.account = acc
-    saveSettings({ tutorialAccountId: acc.id, tutorialDone: false, tourSeen: [] })
+    // this new profile has not seen the tutorial yet — per-account gating
+    const doneMap = { ...(loadSettings().tutorialDoneAccounts || {}) }
+    doneMap[acc.id] = false
+    saveSettings({ tutorialAccountId: acc.id, tutorialDone: false, tutorialDoneAccounts: doneMap, tourSeen: [] })
     ctx.toast(`Welcome, ${acc.name}!`)
     // first-run for this profile: walk them through the tutorial once
     ctx.go('tutorial')

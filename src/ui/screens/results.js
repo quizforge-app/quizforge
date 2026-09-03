@@ -4,7 +4,8 @@ import { esc, sectionTitle } from '../helpers.js'
 import { startMistakeReview, startWeakReview } from '../mistakes.js'
 import { explainAnswer } from '../../lib/llm/explain.js'
 import { hasApiKey } from '../../lib/llm/gemini.js'
-import { loadSettings, getWeakTerms, listDueCards } from '../../lib/storage.js'
+import { loadSettings, getWeakTerms, listDueCards, listDocs } from '../../lib/storage.js'
+import { keyTerms } from '../../lib/textproc.js'
 import { exportQuiz } from '../../lib/export.js'
 import { showShareModal } from '../shareModal.js'
 
@@ -25,6 +26,29 @@ export async function render(root, ctx) {
     weakCount = weak.length
     dueCount = due.length
   } catch { /* study data unavailable — the card simply hides */ }
+
+  // "You might also like": the sibling document sharing the most key terms
+  // with the one just quizzed.
+  let suggestion = null
+  try {
+    const { getDoc } = await import('../../lib/storage.js')
+    const meta = (await listDocs()).filter(d => d.id !== r.docId)
+    // current doc's key terms come from its answers' correct lines — cheap and
+    // already in memory; siblings need their full text via getDoc
+    const mine = new Set(keyTerms(r.review?.map(x => x.correct).join('. ') || '').map(t => t.term.toLowerCase()).slice(0, 12))
+    if (mine.size) {
+      let best = null
+      for (const m of meta.slice(0, 12)) {
+        const full = await getDoc(m.id).catch(() => null)
+        if (!full?.text) continue
+        const theirs = new Set(keyTerms(full.text).map(t => t.term.toLowerCase()).slice(0, 16))
+        let overlap = 0
+        for (const t of mine) if (theirs.has(t)) overlap++
+        if (!best || overlap > best.overlap) best = { doc: { ...m }, overlap }
+      }
+      if (best && best.overlap >= 2) suggestion = best
+    }
+  } catch { /* suggestion is optional */ }
 
   const verdict = r.percent >= 90
     ? ['Outstanding!', 'You have mastered this material.']
@@ -103,6 +127,15 @@ export async function render(root, ctx) {
           ${dueCount > 0 ? `<button class="btn btn-secondary ns-btn" id="due-review-btn">${icon('timer')} Review ${dueCount} due card${dueCount === 1 ? '' : 's'}</button>` : ''}
         </div>
       </div>` : ''}
+      ${suggestion && suggestion.overlap >= 2 ? `
+      <button class="also-like" id="also-like-btn" data-tooltip="Open this document's reviewer">
+        <span class="al-icon">${icon('book')}</span>
+        <span class="al-main">
+          <span class="al-title">You might also like: ${esc(suggestion.doc.name)}</span>
+          <span class="al-sub">${suggestion.overlap} key term${suggestion.overlap === 1 ? '' : 's'} in common with this quiz</span>
+        </span>
+        <span class="al-go">${icon('chevronRight')}</span>
+      </button>` : ''}
 
       <button class="btn btn-secondary" id="toggle-review" style="margin-top:22px;width:100%" data-tooltip="See each question with the correct answer">
         ${icon('eye')} Review answers
@@ -221,6 +254,9 @@ export async function render(root, ctx) {
   root.querySelector('#weak-review-btn')?.addEventListener('click', () => startWeakReview(ctx))
   root.querySelector('#due-review-btn')?.addEventListener('click', () => {
     import('../mistakes.js').then(m => m.startDueReview(ctx))
+  })
+  root.querySelector('#also-like-btn')?.addEventListener('click', () => {
+    ctx.go('reviewer', suggestion.doc.id)
   })
   root.querySelector('#library-btn').addEventListener('click', () => {
     if (r.shared) { ctx.state.sharedQuiz = null; ctx.state.challenge = null }

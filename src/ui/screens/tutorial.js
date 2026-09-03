@@ -99,37 +99,42 @@ const SLIDES = [
 ]
 
 // ── Audio cache ──
+// Narration clips load lazily: current + next slide only, instead of
+// ~1.1MB of MP3s upfront on a possibly-metered connection.
 const audioCache = new Map()
 let audioEl = null
 let audioUnlocked = false
 let pendingPlayName = null
 
-function preload() {
-  for (const slide of SLIDES) {
-    if (!audioCache.has(slide.mp3)) {
-      const a = new Audio()
-      a.preload = 'auto'
-      a.src = `/wizard/${slide.mp3}.mp3`
-      a.load()
-      audioCache.set(slide.mp3, a)
+function cacheAudio(name) {
+  if (audioCache.has(name)) return
+  const a = new Audio()
+  a.preload = 'auto'
+  a.src = `/wizard/${name}.mp3`
+  a.load()
+  audioCache.set(name, a)
+}
+
+function preloadAround(idx) {
+  cacheAudio(SLIDES[idx].mp3)
+  if (SLIDES[idx + 1]) cacheAudio(SLIDES[idx + 1].mp3)
+}
+
+// Browsers block audio until the user interacts with the page — if play()
+// is refused, remember the clip and replay it on the first gesture.
+function setupAudioUnlock() {
+  if (audioUnlocked) return
+  const unlock = () => {
+    audioUnlocked = true
+    if (pendingPlayName) {
+      const n = pendingPlayName
+      pendingPlayName = null
+      playAudio(n)
     }
   }
-  if (!audioUnlocked) {
-    const unlock = () => {
-      audioUnlocked = true
-      if (pendingPlayName) {
-        const n = pendingPlayName
-        pendingPlayName = null
-        playAudio(n)
-      }
-      removeEventListener('click', unlock)
-      removeEventListener('touchstart', unlock)
-      removeEventListener('keydown', unlock)
-    }
-    addEventListener('click', unlock, { once: true })
-    addEventListener('touchstart', unlock, { once: true })
-    addEventListener('keydown', unlock, { once: true })
-  }
+  addEventListener('click', unlock, { once: true })
+  addEventListener('touchstart', unlock, { once: true })
+  addEventListener('keydown', unlock, { once: true })
 }
 
 function voiceOn() {
@@ -170,7 +175,8 @@ function iconBack() {
 
 export function render(root, ctx) {
   let idx = 0
-  preload()
+  preloadAround(0)
+  setupAudioUnlock()
 
   // Resume quiz state from the same session
   let previousScreen = null
@@ -258,7 +264,11 @@ export function render(root, ctx) {
 
   async function finish() {
     stopAudio()
-    saveSettings({ tutorialDone: true })
+    // mark THIS account as having seen the tutorial (per-profile, not global)
+    const aid = ctx.state.account?.id || null
+    const doneMap = { ...(loadSettings().tutorialDoneAccounts || {}) }
+    if (aid) doneMap[aid] = true
+    saveSettings({ tutorialDone: true, tutorialDoneAccounts: doneMap })
     ctx.go('library')
   }
 
@@ -277,6 +287,7 @@ export function render(root, ctx) {
     progressEl.setAttribute('aria-valuenow', String(idx + 1))
     // Play voice for this slide
     stopAudio()
+    preloadAround(idx)
     setTimeout(() => playAudio(SLIDES[idx].mp3), 200)
   }
 

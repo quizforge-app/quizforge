@@ -7,7 +7,7 @@ import { speak, pause, resume, stop, isSupported } from '../../lib/tts.js'
 import { icon } from '../icons.js'
 import { esc, typeLabel, sectionTitle } from '../helpers.js'
 import { attachZoom } from '../../lib/imgZoom.js'
-import { exportSummary, printStudySheet } from '../../lib/export.js'
+import { exportSummary, printStudySheet, exportPdfHandout } from '../../lib/export.js'
 
 function chunkParas(sentenceList, size = 3) {
   const out = []
@@ -219,9 +219,14 @@ export async function render(root, ctx) {
           <input type="range" id="tts-rate" min="0.8" max="1.5" step="0.1" value="${settings.ttsRate || 1}" aria-label="Read-aloud speed" />
         </div>
       </div>
+      <div id="find-bar" class="find-bar hidden">
+        <input type="search" id="find-input" class="text-input" placeholder="Find in document…" aria-label="Find in document" autocomplete="off" />
+        <span class="faint" id="find-count"></span>
+      </div>
       <article class="reader" id="review-content"></article>
       <div class="reader-actions">
         <button class="btn btn-primary" id="quiz-btn">${icon('play')} Quiz me on this</button>
+        <button class="btn btn-primary" id="pdf-btn" style="margin-top:10px;width:100%" data-tooltip="Download this reviewer as a formatted PDF handout">${icon('download')} Export PDF handout</button>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:10px">
           <button class="btn btn-secondary" id="export-md-btn" data-tooltip="Download the study sheet as Markdown">${icon('download')} Export .md</button>
           <button class="btn btn-secondary" id="print-btn" data-tooltip="Open a printable study sheet">${icon('print')} Print sheet</button>
@@ -279,9 +284,70 @@ export async function render(root, ctx) {
       fontControls.style.visibility = 'visible'
     }
     attachSaveOnPress()
+    // find-in-document lives in the Full text tab
+    root.querySelector('#find-bar')?.classList.toggle('hidden', view !== 'full')
+    if (view !== 'full') clearFind()
     root.querySelectorAll('.review-toggle [data-tab]').forEach(b =>
       b.classList.toggle('on', b.dataset.tab === view)
     )
+  }
+
+  /* Find in document: highlight matches inside Full text, step through them */
+  const findBar = root.querySelector('#find-bar')
+  const findInput = root.querySelector('#find-input')
+  const findCount = root.querySelector('#find-count')
+  let findMatches = []
+  let findPos = -1
+
+  function clearFind() {
+    findMatches = []
+    findPos = -1
+    if (findCount) findCount.textContent = ''
+    content.querySelectorAll('mark.find-hit, mark.find-current').forEach(m => {
+      const parent = m.parentNode
+      parent.replaceChild(document.createTextNode(m.textContent), m)
+      parent.normalize()
+    })
+  }
+
+  function runFind() {
+    clearFind()
+    const q = (findInput?.value || '').trim()
+    if (q.length < 2) return
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    while (walker.nextNode()) {
+      const n = walker.currentNode
+      if (n.nodeValue.toLowerCase().includes(q.toLowerCase())) nodes.push(n)
+    }
+    for (const node of nodes) {
+      const text = node.nodeValue
+      const frag = document.createDocumentFragment()
+      let pos = 0
+      const lower = text.toLowerCase()
+      let at = lower.indexOf(q.toLowerCase())
+      while (at !== -1) {
+        frag.appendChild(document.createTextNode(text.slice(pos, at)))
+        const mark = document.createElement('mark')
+        mark.className = 'find-hit'
+        mark.textContent = text.slice(at, at + q.length)
+        frag.appendChild(mark)
+        findMatches.push(mark)
+        pos = at + q.length
+        at = lower.indexOf(q.toLowerCase(), pos)
+      }
+      frag.appendChild(document.createTextNode(text.slice(pos)))
+      node.parentNode.replaceChild(frag, node)
+    }
+    stepFind(0)
+  }
+
+  function stepFind(dir) {
+    if (!findMatches.length) { if (findCount) findCount.textContent = '0/0'; return }
+    findPos = dir === 0 ? 0 : (findPos + dir + findMatches.length) % findMatches.length
+    findMatches.forEach((m, i) => m.classList.toggle('find-current', i === findPos))
+    if (findCount) findCount.textContent = `${findPos + 1}/${findMatches.length}`
+    findMatches[findPos]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 
   /* Long-press a paragraph to bank it into spaced repetition — the same
@@ -342,6 +408,12 @@ export async function render(root, ctx) {
       applyView()
     })
   )
+
+  findInput?.addEventListener('input', () => runFind())
+  findInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1) }
+    if (e.key === 'Escape') { clearFind(); findInput.value = '' }
+  })
 
   /* ── Image viewer ── */
   const viewer = root.querySelector('#img-viewer')
@@ -441,6 +513,20 @@ export async function render(root, ctx) {
   root.querySelector('#export-md-btn').addEventListener('click', () => {
     exportSummary(doc)
     ctx.toast('Downloaded study sheet (.md)')
+  })
+  const pdfBtn = root.querySelector('#pdf-btn')
+  pdfBtn.addEventListener('click', async () => {
+    pdfBtn.disabled = true
+    pdfBtn.textContent = 'Building PDF…'
+    try {
+      await exportPdfHandout(doc, { keyTermDefs, reviewQs })
+      ctx.toast('PDF handout downloaded ✓')
+    } catch {
+      ctx.toast('Could not build the PDF', true)
+    } finally {
+      pdfBtn.disabled = false
+      pdfBtn.innerHTML = `${icon('download')} Export PDF handout`
+    }
   })
   root.querySelector('#print-btn').addEventListener('click', () => {
     if (!printStudySheet(doc)) ctx.toast('Allow pop-ups to print')

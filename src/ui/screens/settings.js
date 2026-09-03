@@ -250,7 +250,7 @@ export async function render(root, ctx) {
         try { ctx.state.account = await getAccount(aid) } catch {}
       }
     }
-    // Reset tutorial state so it shows again
+    // Reset tutorial state so it shows again (global flag kept for legacy)
     saveSettings({ tutorialDone: false, tourSeen: [] })
     ctx.go('tutorial')
   })
