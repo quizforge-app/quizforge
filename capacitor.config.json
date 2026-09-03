@@ -1,6 +1,6 @@
 {
   "appId": "app.quizforge",
-  "appName": "QuizForge",
+  "appName": "Quizard",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"
