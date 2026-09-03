@@ -10,5 +10,21 @@ android/local.properties
 *.log
 .env
 .env.local
+apikey.txt
+api-key
+api-key.txt
+.vercel/
 .idea/
 .vscode/
+
+.netlify/
+
+# Local-only working material: source art, patch intermediates, voice
+# samples, captured screenshots. The finished assets live in public/.
+_orig_images/
+tutorial-quiz/
+tutorial-check-slide1.png
+wizard-theme-onboarding.png
+tmp/
+*.mp3.sample
+android/keystore.properties

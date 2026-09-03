@@ -1,5 +1,19 @@
 apply plugin: 'com.android.application'
 
+// Release signing values load from android/keystore.properties (untracked) or
+// environment variables — never from a committed file. Without them, release
+// builds fall back to unsigned (debug keys) so local builds never break.
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+} else {
+    keystoreProps.setProperty("RELEASE_STORE_FILE", System.getenv("RELEASE_STORE_FILE") ?: "../quizard-release.keystore")
+    keystoreProps.setProperty("RELEASE_STORE_PASSWORD", System.getenv("RELEASE_STORE_PASSWORD") ?: "")
+    keystoreProps.setProperty("RELEASE_KEY_ALIAS", System.getenv("RELEASE_KEY_ALIAS") ?: "quizard")
+    keystoreProps.setProperty("RELEASE_KEY_PASSWORD", System.getenv("RELEASE_KEY_PASSWORD") ?: "")
+}
+
 android {
     namespace "app.quizforge"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,16 +30,29 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            storeFile file(keystoreProps['RELEASE_STORE_FILE'])
+            storePassword keystoreProps['RELEASE_STORE_PASSWORD']
+            keyAlias keystoreProps['RELEASE_KEY_ALIAS']
+            keyPassword keystoreProps['RELEASE_KEY_PASSWORD']
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Only attach the release signing config when credentials exist —
+            // otherwise the APK builds unsigned instead of failing.
+            if (keystoreProps['RELEASE_STORE_PASSWORD']) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
     applicationVariants.all { variant ->
         variant.outputs.all {
-            outputFileName = "Quizforge.apk"
+            outputFileName = "Quizard.apk"
         }
     }
 }
