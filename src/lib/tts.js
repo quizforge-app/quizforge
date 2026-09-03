@@ -93,11 +93,19 @@ function fishGraph() {
 }
 
 async function fetchFishChunk(text, speed, signal) {
+  // Instant fallback when offline — never hang waiting for the network.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error('offline')
+  }
+  // Combine the caller's abort signal with an 8s probe timeout so flaky
+  // connections degrade to the on-device voice quickly.
+  const timeout = AbortSignal.timeout(8000)
+  const merged = signal ? AbortSignal.any([signal, timeout]) : timeout
   const res = await fetch(TTS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, speed }),
-    signal
+    signal: merged
   })
   if (!res.ok) throw new Error('fish_unavailable')
   return URL.createObjectURL(await res.blob())

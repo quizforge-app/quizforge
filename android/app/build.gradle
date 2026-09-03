@@ -1,5 +1,9 @@
 apply plugin: 'com.android.application'
 
+// App version comes from package.json — the web and APK versions can never
+// drift apart. Bump the version in package.json, then bump versionCode here.
+def packageJson = new groovy.json.JsonSlurper().parseText(rootProject.file('../package.json').text)
+
 // Release signing values load from android/keystore.properties (untracked) or
 // environment variables — never from a committed file. Without them, release
 // builds fall back to unsigned (debug keys) so local builds never break.
@@ -21,8 +25,8 @@ android {
         applicationId "app.quizforge"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName packageJson.version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

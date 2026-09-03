@@ -1,7 +1,7 @@
 {
   "name": "quizard",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Offline document-to-quiz study app. PDF/PPTX/DOCX in, quizzes out. 100% local.",
   "scripts": {
