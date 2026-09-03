@@ -1,20 +1,30 @@
 import { icon } from '../icons.js'
 import { TYPE_META } from '../../lib/quizgen.js'
-import { esc } from '../helpers.js'
-import { startMistakeReview } from '../mistakes.js'
+import { esc, sectionTitle } from '../helpers.js'
+import { startMistakeReview, startWeakReview } from '../mistakes.js'
 import { explainAnswer } from '../../lib/llm/explain.js'
 import { hasApiKey } from '../../lib/llm/gemini.js'
-import { loadSettings } from '../../lib/storage.js'
+import { loadSettings, getWeakTerms, listDueCards } from '../../lib/storage.js'
 import { exportQuiz } from '../../lib/export.js'
 import { showShareModal } from '../shareModal.js'
 
-export function render(root, ctx) {
+export async function render(root, ctx) {
   const r = ctx.state.lastResult
   if (!r) { ctx.go('library'); return }
 
   const canExplain = hasApiKey() && loadSettings().aiExplain !== false
   const canExport = true
   const ch = ctx.state.challenge || r.challenge || null
+
+  // What should the learner do next? Pull their real weak spots and due
+  // cards so the call-to-action carries actual numbers.
+  let weakCount = 0
+  let dueCount = 0
+  try {
+    const [weak, due] = await Promise.all([getWeakTerms(null), listDueCards(60)])
+    weakCount = weak.length
+    dueCount = due.length
+  } catch { /* study data unavailable — the card simply hides */ }
 
   const verdict = r.percent >= 90
     ? ['Outstanding!', 'You have mastered this material.']
@@ -71,7 +81,7 @@ export function render(root, ctx) {
       </div>` : ''}
 
       ${Object.keys(r.byType).length > 1 ? `
-      <div class="section-title">By question type</div>
+      ${sectionTitle('By question type')}
       <div class="card breakdown">
         ${Object.entries(r.byType).map(([t, v]) => `
           <div class="bd-row">
@@ -79,6 +89,19 @@ export function render(root, ctx) {
             <div class="bd-bar"><div class="bd-fill" style="width:${Math.round((v.c / v.t) * 100)}%"></div></div>
             <span class="bd-score">${v.c}/${v.t}</span>
           </div>`).join('')}
+      </div>` : ''}
+
+      ${!r.mistakeMode && (weakCount > 0 || dueCount > 0) ? `
+      <div class="next-steps">
+        <div class="ns-head">${icon('sparkles')} What's next?</div>
+        <div class="ns-lines">
+          ${weakCount > 0 ? `<div class="ns-line">You're weak on <b>${weakCount} term${weakCount === 1 ? '' : 's'}</b> across your quizzes.</div>` : ''}
+          ${dueCount > 0 ? `<div class="ns-line"><b>${dueCount} review card${dueCount === 1 ? ' is' : 's are'} due</b> — spaced repetition works best today, not tomorrow.</div>` : ''}
+        </div>
+        <div class="ns-actions">
+          ${weakCount > 0 ? `<button class="btn btn-primary ns-btn" id="weak-review-btn">${icon('target')} Drill my weak spots</button>` : ''}
+          ${dueCount > 0 ? `<button class="btn btn-secondary ns-btn" id="due-review-btn">${icon('timer')} Review ${dueCount} due card${dueCount === 1 ? '' : 's'}</button>` : ''}
+        </div>
       </div>` : ''}
 
       <button class="btn btn-secondary" id="toggle-review" style="margin-top:22px;width:100%" data-tooltip="See each question with the correct answer">
@@ -110,10 +133,50 @@ export function render(root, ctx) {
       const C = 2 * Math.PI * 76
       root.querySelector('#ring-fill').style.strokeDashoffset = String(C * (1 - r.percent / 100))
       animateNumber(root.querySelector('#rr-pct'), r.percent, '%')
+      sparkleTrail(root)
     }, 150)
   })
 
   if (r.percent >= 70) fireConfetti(root.querySelector('#confetti'))
+
+  // Sparkle trail that chases the ring arc while the score fills.
+  function sparkleTrail(rootEl) {
+    const ring = rootEl.querySelector('.result-ring')
+    if (!ring || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const N = 14
+    const sparks = []
+    for (let i = 0; i < N; i++) {
+      const s = document.createElement('span')
+      s.className = 'ring-spark'
+      ring.appendChild(s)
+      sparks.push(s)
+    }
+    const duration = 1000
+    const start = performance.now()
+    let raf = 0
+    // the ring fills from the top going clockwise (svg rotated -90deg)
+    function tick(now) {
+      const t = Math.min(1, (now - start) / duration)
+      // head of the arc, 0 → percent
+      const head = t * (r.percent / 100)
+      sparks.forEach((s, i) => {
+        const trailPos = Math.max(0, head - i * 0.035)
+        const angle = trailPos * 2 * Math.PI - Math.PI / 2
+        const R = 76
+        const x = 86 + R * Math.cos(angle) * (172 / 172)
+        const y = 86 + R * Math.sin(angle)
+        const fade = 1 - i / N
+        s.style.left = x + 'px'
+        s.style.top = y + 'px'
+        s.style.opacity = String(fade * (trailPos > 0 ? 1 : 0))
+        s.style.transform = `translate(-50%, -50%) scale(${0.55 + fade * 0.45})`
+      })
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else sparks.forEach(s => s.remove())
+    }
+    raf = requestAnimationFrame(tick)
+    return () => { cancelAnimationFrame(raf); sparks.forEach(s => s.remove()) }
+  }
 
   root.querySelector('#toggle-review').addEventListener('click', () => {
     root.querySelector('#review-panel').classList.toggle('hidden')
@@ -155,6 +218,10 @@ export function render(root, ctx) {
     else ctx.go('quiz')
   })
   root.querySelector('#review-mistakes-btn')?.addEventListener('click', () => startMistakeReview(ctx, r.docId))
+  root.querySelector('#weak-review-btn')?.addEventListener('click', () => startWeakReview(ctx))
+  root.querySelector('#due-review-btn')?.addEventListener('click', () => {
+    import('../mistakes.js').then(m => m.startDueReview(ctx))
+  })
   root.querySelector('#library-btn').addEventListener('click', () => {
     if (r.shared) { ctx.state.sharedQuiz = null; ctx.state.challenge = null }
     ctx.go('library')

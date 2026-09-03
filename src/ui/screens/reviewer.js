@@ -1,10 +1,12 @@
-import { getDoc, listDocImages, loadSettings, saveSettings } from '../../lib/storage.js'
+import { getDoc, listDocImages, loadSettings, saveSettings, upsertSrsFromMistake } from '../../lib/storage.js'
 import { detectTopics } from '../../lib/topics.js'
 import { sentences } from '../../lib/textproc.js'
 import { summarizeDoc } from '../../lib/summarize.js'
+import { generateQuiz } from '../../lib/quizgen.js'
 import { speak, pause, resume, stop, isSupported } from '../../lib/tts.js'
 import { icon } from '../icons.js'
-import { esc, typeLabel } from '../helpers.js'
+import { esc, typeLabel, sectionTitle } from '../helpers.js'
+import { attachZoom } from '../../lib/imgZoom.js'
 import { exportSummary, printStudySheet } from '../../lib/export.js'
 
 function chunkParas(sentenceList, size = 3) {
@@ -15,7 +17,13 @@ function chunkParas(sentenceList, size = 3) {
   return out
 }
 
+let currentCleanup = null
+export function unmount() {
+  if (currentCleanup) { currentCleanup(); currentCleanup = null }
+}
+
 export async function render(root, ctx) {
+  if (currentCleanup) currentCleanup()
   const doc = await getDoc(ctx.state.currentDocId)
   if (!doc) { ctx.go('library'); return }
 
@@ -24,59 +32,132 @@ export async function render(root, ctx) {
   let view = settings.reviewerView || 'summary'
   if (view === 'gallery') view = 'summary'
 
-  const sents = sentences(doc.text)
-  const { topics, membership } = detectTopics(doc.text)
-  const summary = summarizeDoc(doc.text)
   const images = await listDocImages(doc.id)
   const objectUrls = new Map()
 
-  const sections = []
-  if (topics.length && sents.length) {
-    const buckets = new Map(topics.map(t => [t.title, []]))
-    const general = []
-    for (const s of sents) {
-      const t = membership.get(s)
-      if (t && buckets.has(t)) buckets.get(t).push(s)
-      else general.push(s)
+  // Heavy NLP (sentence splitting, topic detection, summarisation) is deferred
+  // until after the screen paints so opening a large document doesn't freeze the UI.
+  let sents, topics, summary, sections, readTargets, keyTermDefs, reviewQs
+  let nlpBuilding = false
+  function buildNlp() {
+    sents = sentences(doc.text)
+    const t = detectTopics(doc.text)
+    topics = t.topics
+    const membership = t.membership
+    summary = summarizeDoc(doc.text)
+    sections = []
+    if (topics.length && sents.length) {
+      const buckets = new Map(topics.map(tp => [tp.title, []]))
+      const general = []
+      for (const s of sents) {
+        const tt = membership.get(s)
+        if (tt && buckets.has(tt)) buckets.get(tt).push(s)
+        else general.push(s)
+      }
+      if (general.length >= 2) sections.push({ title: 'Overview', paras: chunkParas(general) })
+      for (const tp of topics) {
+        const ss = buckets.get(tp.title)
+        if (ss?.length) sections.push({ title: tp.title, paras: chunkParas(ss) })
+      }
+    } else {
+      sections.push({ title: null, paras: chunkParas(sents.length ? sents : doc.text.split(/(?<=[.!?])\s+/)) })
     }
-    if (general.length >= 2) sections.push({ title: 'Overview', paras: chunkParas(general) })
-    for (const t of topics) {
-      const ss = buckets.get(t.title)
-      if (ss?.length) sections.push({ title: t.title, paras: chunkParas(ss) })
+    // key term → the sentence that introduces it (for the definitions part)
+    keyTermDefs = []
+    const seenTerms = new Set()
+    for (const sec of summary.sections) {
+      for (const term of sec.terms) {
+        const key = term.toLowerCase()
+        if (seenTerms.has(key) || keyTermDefs.length >= 8) continue
+        seenTerms.add(key)
+        const def = sents.find(st => st.toLowerCase().includes(key) && st.length > 20)
+        if (def) keyTermDefs.push({ term, def })
+      }
     }
-  } else {
-    sections.push({ title: null, paras: chunkParas(sents.length ? sents : doc.text.split(/(?<=[.!?])\s+/)) })
-  }
-
-  const readTargets = {
-    summary: summary.sections.flatMap(s => s.points),
-    full: sections.flatMap(s => s.paras)
+    // deterministic self-test questions (stable across re-opens)
+    const q = generateQuiz(doc, {
+      count: 5,
+      mix: { mcq: true, id: true },
+      difficulty: 'medium',
+      shuffle: false,
+      fixedSeed: 7
+    })
+    reviewQs = (q.questions || []).filter(q => q.type === 'mcq' || q.type === 'id')
+    readTargets = {
+      summary: summary.sections.flatMap(s => s.points),
+      full: sections.flatMap(s => s.paras)
+    }
   }
 
   function summaryHtml() {
     if (!summary.tldr.length) {
       return `<div class="empty-state"><h3>Not enough to summarize</h3><p>This document has too little readable text. Try the Full text tab.</p></div>`
     }
-    return `
-      <div class="sum-tldr">
-        <div class="sum-label">${icon('zap')} In a nutshell</div>
-        ${summary.tldr.map(p => `<p>${esc(p)}</p>`).join('')}
-      </div>
-      <div class="section-title">Part by part — ${summary.sections.length} section${summary.sections.length === 1 ? '' : 's'}</div>
-      ${summary.sections.map((sec, i) => `
-        <div class="sum-section">
-          <div class="sum-head">
-            <span class="sum-num">${String(i + 1).padStart(2, '0')}</span>
-            <h3>${esc(sec.title)}</h3>
-            <span class="chip-count">${sec.sentenceCount} sentence${sec.sentenceCount === 1 ? '' : 's'}</span>
-          </div>
-          <ul class="sum-points">
-            ${sec.points.map(p => `<li>${esc(p)}</li>`).join('')}
-          </ul>
-          ${sec.terms.length ? `<div class="chip-row sum-terms">${sec.terms.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
-        </div>`).join('')}
-      <p class="sum-note">Key points extracted from your document — open <strong>Full text</strong> to read everything.</p>
-    `
+    const parts = []
+    // Reviewer header, like the title block of a printed handout
+    parts.push(`
+      <div class="rvw-head">
+        <div class="rvw-eyebrow">${icon('book')} Study Reviewer</div>
+        <h1 class="rvw-title">${esc(doc.name)}</h1>
+        <div class="rvw-meta">${typeLabel(doc.type)} · ${doc.wordCount.toLocaleString()} words · ${sections.length} section${sections.length === 1 ? '' : 's'} · ${keyTermDefs.length} key term${keyTermDefs.length === 1 ? '' : 's'}</div>
+      </div>`)
+    // I. Overview
+    if (summary.tldr.length) {
+      parts.push(`
+        <div class="rvw-part">
+          <div class="rvw-part-head"><span class="rvw-num">I</span><h3>Overview</h3></div>
+          ${summary.tldr.map(p => `<p class="rvw-overview" data-point>${esc(p)}</p>`).join('')}
+        </div>`)
+    }
+    // II. Key terms & definitions
+    if (keyTermDefs.length) {
+      parts.push(`
+        <div class="rvw-part">
+          <div class="rvw-part-head"><span class="rvw-num">II</span><h3>Key Terms &amp; Definitions</h3></div>
+          <dl class="rvw-terms">
+            ${keyTermDefs.map(t => `<div class="rvw-term"><dt>${esc(t.term)}</dt><dd>${esc(t.def)}</dd></div>`).join('')}
+          </dl>
+        </div>`)
+    }
+    // III. Section notes
+    if (summary.sections.length) {
+      parts.push(`
+        <div class="rvw-part">
+          <div class="rvw-part-head"><span class="rvw-num">III</span><h3>Section Notes</h3></div>
+          ${summary.sections.map((sec, i) => `
+            <div class="sum-section">
+              <div class="sum-head">
+                <span class="sum-num">${String(i + 1).padStart(2, '0')}</span>
+                <h4>${esc(sec.title)}</h4>
+                <span class="chip-count">${sec.sentenceCount} sentence${sec.sentenceCount === 1 ? '' : 's'}</span>
+              </div>
+              <ul class="sum-points">
+                ${sec.points.map(p => `<li>${esc(p)}</li>`).join('')}
+              </ul>
+            </div>`).join('')}
+        </div>`)
+    }
+    // IV. Self-test
+    if (reviewQs.length) {
+      parts.push(`
+        <div class="rvw-part">
+          <div class="rvw-part-head"><span class="rvw-num">IV</span><h3>Test Yourself</h3></div>
+          <ol class="rvq-list">
+            ${reviewQs.map(q => {
+              const qText = q.type === 'mcq' ? esc(q.stem) : `Identify the term: ${esc(q.clue)}`
+              const opts = q.type === 'mcq'
+                ? `<div class="rvq-opts">${(q.options || []).map((o, oi) => `<span>${String.fromCharCode(65 + oi)}. ${esc(o)}</span>`).join('')}</div>`
+                : ''
+              const ans = q.type === 'mcq' ? (q.options?.[q.answerIndex] ?? '') : (q.answer ?? '')
+              return `<li class="rvq">
+                <div class="rvq-q">${qText}${opts}</div>
+                <details class="rvq-reveal"><summary>Check answer</summary><span>${esc(ans)}</span></details>
+              </li>`
+            }).join('')}
+          </ol>
+        </div>`)
+    }
+    return parts.join('') + `<p class="sum-note">Forged from your document — open <strong>Full text</strong> to read everything.</p>`
   }
 
   function fullHtml() {
@@ -106,7 +187,7 @@ export async function render(root, ctx) {
   }
 
   const tabs = [
-    { id: 'summary', label: 'Summary', icon: 'zap' },
+    { id: 'summary', label: 'Reviewer', icon: 'book' },
     ...(images.length ? [{ id: 'gallery', label: `Gallery`, icon: 'fileText' }] : []),
     { id: 'full', label: 'Full text', icon: 'listChecks' }
   ]
@@ -130,12 +211,12 @@ export async function render(root, ctx) {
         </div>
       </div>
       <div id="tts-bar" class="tts-bar">
-        <button class="icon-btn" id="tts-play" data-tooltip="Read aloud">${icon('play')}</button>
+        <button class="icon-btn" id="tts-play" data-tooltip="Read aloud — in the wizard's voice">${icon('play')}</button>
         <button class="icon-btn hidden" id="tts-pause" data-tooltip="Pause">${icon('timer')}</button>
         <button class="icon-btn hidden" id="tts-stop" data-tooltip="Stop">${icon('x')}</button>
         <div class="tts-rate">
           <span class="faint" style="font-size:11px">Speed</span>
-          <input type="range" id="tts-rate" min="0.8" max="1.5" step="0.1" value="${settings.ttsRate || 1}" />
+          <input type="range" id="tts-rate" min="0.8" max="1.5" step="0.1" value="${settings.ttsRate || 1}" aria-label="Read-aloud speed" />
         </div>
       </div>
       <article class="reader" id="review-content"></article>
@@ -148,6 +229,11 @@ export async function render(root, ctx) {
       </div>
     </div>
     <div class="img-viewer hidden" id="img-viewer">
+      <div class="iv-zoom-bar">
+        <button class="iv-zoom" id="iv-zoom-out" aria-label="Zoom out">${icon('minus')}</button>
+        <button class="iv-zoom" id="iv-reset" aria-label="Reset zoom">${icon('refresh')}</button>
+        <button class="iv-zoom" id="iv-zoom-in" aria-label="Zoom in">${icon('plus')}</button>
+      </div>
       <button class="iv-close" id="iv-close">${icon('x')}</button>
       <button class="iv-nav iv-prev" id="iv-prev">${icon('chevronLeft')}</button>
       <img id="iv-img" alt="Viewing image" />
@@ -163,26 +249,85 @@ export async function render(root, ctx) {
 
   function applyView() {
     stopTts()
-    if (view === 'summary') {
-      content.innerHTML = summaryHtml()
-      content.classList.add('summary-mode')
-      fontControls.style.visibility = 'hidden'
-    } else if (view === 'gallery') {
+    if (view === 'gallery') {
       content.innerHTML = galleryHtml()
       content.classList.remove('summary-mode')
       fontControls.style.visibility = 'hidden'
       content.querySelectorAll('.gallery-item').forEach(item =>
         item.addEventListener('click', () => openViewer(parseInt(item.dataset.i, 10)))
       )
+      root.querySelectorAll('.review-toggle [data-tab]').forEach(b =>
+        b.classList.toggle('on', b.dataset.tab === view))
+      return
+    }
+    if (!summary) {
+      content.innerHTML = '<div class="reader-loading">Preparing your document…</div>'
+      if (!nlpBuilding) {
+        nlpBuilding = true
+        setTimeout(() => { buildNlp(); nlpBuilding = false; applyView() }, 0)
+      }
+      return
+    }
+    if (view === 'summary') {
+      content.innerHTML = summaryHtml()
+      content.classList.add('summary-mode')
+      fontControls.style.visibility = 'hidden'
     } else {
       content.innerHTML = fullHtml()
       content.classList.remove('summary-mode')
       applyScale()
       fontControls.style.visibility = 'visible'
     }
+    attachSaveOnPress()
     root.querySelectorAll('.review-toggle [data-tab]').forEach(b =>
       b.classList.toggle('on', b.dataset.tab === view)
     )
+  }
+
+  /* Long-press a paragraph to bank it into spaced repetition — the same
+     store mistakes feed, so saved lines resurface as review cards. */
+  function attachSaveOnPress() {
+    let timer = null
+    let firedFor = null
+    content.querySelectorAll('[data-para]').forEach(p => {
+      const start = e => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return
+        firedFor = null
+        timer = setTimeout(async () => {
+          firedFor = p
+          try {
+            const sentence = p.textContent.trim().slice(0, 300)
+            const term = keyTermDefs.find(t => sentence.toLowerCase().includes(t.term.toLowerCase()))?.term
+              || firstKeyPhrase(sentence)
+            await upsertSrsFromMistake({ docId: doc.id, sentence, term, type: 'note' })
+            p.classList.add('saved-flash')
+            setTimeout(() => p.classList.remove('saved-flash'), 900)
+            ctx.toast('Saved to your review deck ✦')
+          } catch {
+            ctx.toast('Could not save this line', true)
+          }
+        }, 550)
+      }
+      const cancel = () => { if (firedFor === null) clearTimeout(timer) }
+      p.addEventListener('pointerdown', start)
+      p.addEventListener('pointerup', cancel)
+      p.addEventListener('pointerleave', cancel)
+      p.addEventListener('pointercancel', cancel)
+      p.addEventListener('contextmenu', e => { if (firedFor) e.preventDefault() })
+    })
+  }
+  function firstKeyPhrase(sentence) {
+    // fall back to the most meaningful capitalized/named phrase in the line
+    const STOP = /^(The|This|That|These|Those|It|Its|In|At|On|And|But|For|With|When|After|Today|Just|Only|Most|Many|Both|Each|Such|Then|They|There)$/
+    const words = sentence.split(/\s+/).slice(0, 6)
+    // prefer a capitalized run that skips a leading stopword (e.g. "Just ... NASA")
+    for (let i = 0; i < Math.min(3, words.length); i++) {
+      const m = words.slice(i).join(' ').match(/^([A-Z][a-zA-Z'’-]+(?:\s+(?:of|the|de|van|von|da)?[A-Z][a-zA-Z'’-]+)*)/)
+      if (m && m[1].length > 3 && !STOP.test(m[1].split(' ')[0])) {
+        return m[1].split(' ').slice(0, 3).join(' ')
+      }
+    }
+    return words.slice(0, 4).join(' ')
   }
 
   const reader = content
@@ -205,6 +350,7 @@ export async function render(root, ctx) {
     const img = images[i]
     root.querySelector('#iv-img').src = objectUrl(img)
     root.querySelector('#iv-caption').textContent = `Image ${i + 1} of ${images.length}${img.slideNumber ? ` · slide ${img.slideNumber}` : ''}`
+    ivZoom.reset()
     viewer.classList.remove('hidden')
   }
   function closeViewer() { viewer.classList.add('hidden') }
@@ -216,6 +362,12 @@ export async function render(root, ctx) {
   root.querySelector('#iv-prev').addEventListener('click', () => stepViewer(-1))
   root.querySelector('#iv-next').addEventListener('click', () => stepViewer(1))
   viewer.addEventListener('click', e => { if (e.target === viewer) closeViewer() })
+
+  const ivImg = root.querySelector('#iv-img')
+  const ivZoom = attachZoom(viewer, ivImg)
+  root.querySelector('#iv-zoom-in').addEventListener('click', e => { e.stopPropagation(); ivZoom.zoomIn() })
+  root.querySelector('#iv-zoom-out').addEventListener('click', e => { e.stopPropagation(); ivZoom.zoomOut() })
+  root.querySelector('#iv-reset').addEventListener('click', e => { e.stopPropagation(); ivZoom.reset() })
 
   /* ── TTS ── */
   const playBtn = root.querySelector('#tts-play')
@@ -249,9 +401,12 @@ export async function render(root, ctx) {
         rate: parseFloat(rateEl.value),
         onend: () => { ttsActive = false; setTtsUi('idle') },
         onindex: i => {
+          // read-along: light up whatever is being spoken, in either view
+          content.querySelectorAll('.speaking').forEach(el => el.classList.remove('speaking'))
           if (view === 'full') {
-            content.querySelectorAll('.speaking').forEach(el => el.classList.remove('speaking'))
             content.querySelectorAll('[data-para]')[i]?.classList.add('speaking')
+          } else {
+            content.querySelectorAll('[data-point]')[i]?.classList.add('speaking')
           }
         }
       })
@@ -291,5 +446,9 @@ export async function render(root, ctx) {
     if (!printStudySheet(doc)) ctx.toast('Allow pop-ups to print')
   })
 
+  currentCleanup = () => {
+    stopTts()
+    objectUrls.forEach(u => URL.revokeObjectURL(u))
+  }
   applyView()
 }

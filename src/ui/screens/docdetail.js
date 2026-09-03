@@ -1,6 +1,9 @@
 import { getDoc, updateDoc, deleteDoc, listDocs, deriveFolders } from '../../lib/storage.js'
+import { hasApiKey } from '../../lib/llm/gemini.js'
+import { ensureVisualAnalysis } from '../../lib/llm/quiz-ai.js'
 import { icon } from '../icons.js'
-import { esc, typeLabel, fmtDate } from '../helpers.js'
+import { esc, typeLabel, fmtDate, statsRow, chipRow, chip, sectionTitle } from '../helpers.js'
+import { confirmModal } from '../confirmModal.js'
 
 export async function render(root, ctx) {
   const doc = await getDoc(ctx.state.currentDocId)
@@ -25,39 +28,39 @@ export async function render(root, ctx) {
         <button class="icon-btn" id="rename-btn" data-tooltip="Rename document">${icon('fileText')}</button>
       </div>
 
-      <div class="stats-row">
-        <div class="stat"><div class="num">${doc.attempts || 0}</div><div class="lbl">Attempts</div></div>
-        <div class="stat"><div class="num">${doc.bestScore != null ? doc.bestScore + '%' : '—'}</div><div class="lbl">Best Score</div></div>
-        <div class="stat"><div class="num">${topics.length}</div><div class="lbl">Topics</div></div>
-      </div>
+      ${statsRow([
+        { value: doc.attempts || 0, label: 'Attempts' },
+        { value: doc.bestScore != null ? doc.bestScore + '%' : '—', label: 'Best Score' },
+        { value: topics.length, label: 'Topics' }
+      ])}
 
-      <div class="section-title">Rename</div>
+      ${sectionTitle('Rename')}
       <div class="rename-row">
-        <input class="text-input" id="name-input" value="${esc(doc.name)}" maxlength="80" />
+        <input class="text-input" id="name-input" value="${esc(doc.name)}" aria-label="Document name" maxlength="80" />
         <button class="btn btn-secondary" id="save-name-btn" data-tooltip="Save new name">${icon('check')} Save</button>
       </div>
 
-      <div class="section-title">Organize</div>
-      <label class="field-label">${icon('folder')} Folder</label>
+      ${sectionTitle('Organize')}
+      <label class="field-label" for="folder-input">${icon('folder')} Folder</label>
       <input class="text-input" id="folder-input" list="doc-folder-list" value="${esc(doc.folder || '')}" maxlength="40" placeholder="None" autocomplete="off" />
       <datalist id="doc-folder-list">${folders.map(f => `<option value="${esc(f)}"></option>`).join('')}</datalist>
-      <label class="field-label" style="margin-top:14px">${icon('tag')} Tags <span style="font-weight:500;color:var(--text-faint)">(comma separated)</span></label>
+      <label class="field-label" for="tags-input" style="margin-top:14px">${icon('tag')} Tags <span style="font-weight:500;color:var(--text-faint)">(comma separated)</span></label>
       <input class="text-input" id="tags-input" value="${esc((doc.tags || []).join(', '))}" maxlength="120" placeholder="exam, chapter 3" autocomplete="off" />
       <button class="btn btn-secondary" id="save-org-btn" style="margin-top:12px;width:100%">${icon('check')} Save organization</button>
 
       ${topics.length ? `
-      <div class="section-title">Detected topics</div>
-      <div class="chip-row">
-        ${topics.map(t => `<span class="chip">${esc(t.title)} <span class="chip-count">${t.count}</span></span>`).join('')}
-      </div>` : ''}
+      ${sectionTitle('Detected topics')}
+      ${chipRow(topics.map(t => chip(t.title, { count: t.count })))}` : ''}
 
-      <div class="section-title">Extracted text</div>
+      ${sectionTitle('Extracted text')}
       <div class="card">
         <div class="preview-box" id="text-preview" style="max-height:120px">${esc(doc.text.slice(0, 400))}${doc.text.length > 400 ? '…' : ''}</div>
         ${doc.text.length > 400 ? `<button class="btn btn-secondary" id="toggle-full-btn" style="margin-top:10px;width:100%">Show full text (${doc.wordCount.toLocaleString()} words)</button>` : ''}
+        ${Array.isArray(doc.visualAnalysis) && doc.visualAnalysis.length ? `<p class="faint" style="font-size:12px;margin:10px 2px 0">${doc.visualAnalysis.length} visual${doc.visualAnalysis.length === 1 ? '' : 's'} analyzed (diagrams, code & charts cached for quizzes)</p>` : ''}
       </div>
 
       <button class="btn btn-secondary" id="reviewer-btn" style="margin-top:20px;width:100%" data-tooltip="Read this document as a study reviewer">${icon('book')} Open Reviewer</button>
+      <button class="btn btn-secondary" id="analyze-btn" style="margin-top:10px;width:100%" data-tooltip="Have Gemini look at the pages, diagrams and code so quizzes can ask about the visuals">${icon('scan')} Analyze visuals</button>
       <button class="btn btn-secondary" id="flashcards-btn" style="margin-top:10px;width:100%" data-tooltip="Study key terms as flip cards">${icon('shuffle')} Flashcards</button>
       <button class="btn btn-primary" id="quiz-btn" style="margin-top:10px">${icon('play')} Create Quiz</button>
       <button class="btn btn-danger-ghost" id="delete-btn" style="margin-top:10px;width:100%">${icon('trash')} Delete document</button>
@@ -103,10 +106,29 @@ export async function render(root, ctx) {
 
   root.querySelector('#quiz-btn').addEventListener('click', () => ctx.go('setup', doc.id))
   root.querySelector('#reviewer-btn').addEventListener('click', () => ctx.go('reviewer', doc.id))
+
+  root.querySelector('#analyze-btn').addEventListener('click', async e => {
+    const btn = e.currentTarget
+    if (!hasApiKey()) { ctx.toast('Add a Gemini key in Settings to analyze visuals', true); return }
+    btn.disabled = true
+    const prev = btn.innerHTML
+    btn.textContent = 'Analyzing…'
+    try {
+      const analysis = await ensureVisualAnalysis(doc)
+      if (!analysis || !analysis.elements.length) ctx.toast('No diagrams, code or charts found')
+      else ctx.toast(`Analyzed ${analysis.elements.length} visual${analysis.elements.length === 1 ? '' : 's'} ✓`)
+      ctx.refresh()
+    } catch {
+      ctx.toast('Visual analysis failed', true)
+    } finally {
+      btn.disabled = false
+      btn.innerHTML = prev
+    }
+  })
   root.querySelector('#flashcards-btn').addEventListener('click', () => ctx.go('flashcards', doc.id))
 
   root.querySelector('#delete-btn').addEventListener('click', async () => {
-    if (!confirm(`Delete "${doc.name}" and all its quiz history?\n\nThis cannot be undone.`)) return
+    if (!await confirmModal(`Delete "${doc.name}"?`, `All quiz history for <b>${esc(doc.name)}</b> will be removed.`)) return
     await deleteDoc(doc.id)
     ctx.toast('Document deleted')
     ctx.go('library')

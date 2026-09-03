@@ -1,19 +1,19 @@
 import { getDoc, bankMistake, resolveMistake, srsIdFor, getSrsItem, upsertSrsFromMistake, gradeSrsItem, getImageById, loadSettings } from '../../lib/storage.js'
-import { generateQuiz } from '../../lib/quizgen.js'
-import { generateQuizAI } from '../../lib/llm/quiz-ai.js'
+import { generateQuiz, TYPE_META } from '../../lib/quizgen.js'
+import { generateQuizAI, gradeShortAnswer } from '../../lib/llm/quiz-ai.js'
 import { explainAnswer } from '../../lib/llm/explain.js'
 import { hasApiKey } from '../../lib/llm/gemini.js'
 import { checkTyped } from '../../lib/textproc.js'
 import { icon } from '../icons.js'
-import { esc, blankHtml, typeLabel } from '../helpers.js'
-import { TYPE_META } from '../../lib/quizgen.js'
+import { esc, blankHtml } from '../helpers.js'
+import { attachZoom } from '../../lib/imgZoom.js'
 
 function configKey(cfg) {
-  return JSON.stringify([cfg.count, cfg.mix, cfg.difficulty, cfg.shuffle, cfg.timerSec, cfg.fresh, cfg.topics, !!cfg.ai])
+  return JSON.stringify([cfg.count, cfg.mix, cfg.difficulty, cfg.shuffle, cfg.timerSec, cfg.fresh, cfg.topics, !!cfg.ai, !!cfg.focusWeak])
 }
 
 function resumeKey() {
-  return `quizforge-active-quiz-${ctxAccountId()}`
+  return `quizard-active-quiz-${ctxAccountId()}`
 }
 
 function ctxAccountId() {
@@ -60,7 +60,11 @@ function updateGeneratingUI(root, done, total) {
   if (label && total) label.textContent = `Writing question ${Math.min(done + 1, total)} of ${total}…`
 }
 
+let quizKeyCleanup = null
+export function unmount() { if (quizKeyCleanup) { quizKeyCleanup(); quizKeyCleanup = null } }
+
 export async function render(root, ctx) {
+  if (quizKeyCleanup) quizKeyCleanup()
   const mistakeState = ctx.state.mistakeReview || null
   let doc = null
   let cfg = null
@@ -214,15 +218,39 @@ export async function render(root, ctx) {
         </div>`
     } else if (q.type === 'id') {
       bodyHtml = `
-        <input class="text-input" id="id-input" placeholder="Type your answer…" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <input class="text-input" id="id-input" placeholder="Type your answer…" aria-label="Type your answer" autocomplete="off" autocapitalize="off" spellcheck="false" />
         <button class="btn btn-primary" id="id-submit" style="margin-top:12px">Submit</button>`
+    } else if (q.type === 'matching') {
+      bodyHtml = `
+        <div class="match-grid">
+          <div class="match-col">
+            ${q.pairs.map((p, i) => `<button class="match-cell match-left" data-left="${i}">${esc(p.left)}</button>`).join('')}
+          </div>
+          <div class="match-col">
+            ${q.rightOrder.map((pi, j) => `<button class="match-cell match-right" data-right="${j}" data-pair="${pi}">${esc(q.pairs[pi].right)}</button>`).join('')}
+          </div>
+        </div>
+        <button class="btn btn-primary" id="match-submit" style="margin-top:14px;width:100%" disabled data-tooltip="Pair every term first">Check matches</button>`
+    } else if (q.type === 'ordering') {
+      bodyHtml = `
+        <div class="order-pool" id="order-pool"></div>
+        <div class="order-answer" id="order-answer"></div>
+        <button class="btn btn-primary" id="order-submit" style="margin-top:14px;width:100%" disabled data-tooltip="Place every step first">Check order</button>`
+    } else if (q.type === 'short') {
+      bodyHtml = `
+        <input class="text-input" id="short-input" placeholder="Type your answer…" aria-label="Type your answer" autocomplete="off" />
+        <button class="btn btn-primary" id="short-submit" style="margin-top:12px">Submit</button>`
     }
 
-    const stemHtml = q.type === 'tf'
-      ? `<p class="q-stem">${esc(q.statement)}</p>`
-      : q.type === 'id'
-        ? `<p class="q-stem">Identify the missing term:<br/><span style="font-size:15px;color:var(--text-dim);display:block;margin-top:10px;line-height:1.6">“${esc(q.clue)}”</span></p>`
-        : `<p class="q-stem">${blankHtml(q.stem)}</p>`
+    const stemHtml = (q.type === 'matching' || q.type === 'ordering')
+      ? ''
+      : q.type === 'short'
+        ? `<p class="q-stem">${esc(q.prompt || q.stem || q.statement || q.clue || '')}</p>`
+        : q.type === 'tf'
+          ? `<p class="q-stem">${esc(q.statement)}</p>`
+          : q.type === 'id'
+            ? `<p class="q-stem">Identify the missing term:<br/><span style="font-size:15px;color:var(--text-dim);display:block;margin-top:10px;line-height:1.6">“${esc(q.clue)}”</span></p>`
+            : `<p class="q-stem">${blankHtml(q.stem)}</p>`
 
     const imageHtml = (q.imageId && imgUrlMap[q.imageId])
       ? `<img class="q-image" src="${imgUrlMap[q.imageId]}" alt="Question image" loading="lazy" />`
@@ -236,6 +264,7 @@ export async function render(root, ctx) {
         ${cfg?.timerSec > 0 ? '<span class="timer-chip" id="timer-chip" data-tooltip="Time remaining">' + icon('timer') + '<span id="timer-val"></span></span>' : ''}
       </div>
       <div class="quiz-body">
+        <img class="q-wiz" src="/wizard/wizard-thinking.png" alt="" />
         ${imageHtml}
         <div class="q-type-badge"><span class="chip on">${TYPE_META[q.type].short}</span></div>
         ${stemHtml}
@@ -249,6 +278,38 @@ export async function render(root, ctx) {
 
     if (cfg?.timerSec > 0) startTimer(cfg.timerSec)
     wireAnswers(q)
+
+    const imgEl = root2.querySelector('.q-image')
+    if (imgEl) imgEl.addEventListener('click', () => openQuizImage(imgEl.src))
+  }
+
+  function openQuizImage(src) {
+    let ov = document.getElementById('quiz-img-viewer')
+    if (!ov) {
+      ov = document.createElement('div')
+      ov.id = 'quiz-img-viewer'
+      ov.className = 'img-viewer hidden'
+      ov.innerHTML = `
+        <div class="iv-zoom-bar">
+          <button class="iv-zoom" id="qiv-zoom-out" aria-label="Zoom out">${icon('minus')}</button>
+          <button class="iv-zoom" id="qiv-reset" aria-label="Reset zoom">${icon('refresh')}</button>
+          <button class="iv-zoom" id="qiv-zoom-in" aria-label="Zoom in">${icon('plus')}</button>
+        </div>
+        <button class="iv-close" id="qiv-close" aria-label="Close">${icon('x')}</button>
+        <img id="qiv-img" alt="Viewing image" />`
+      document.body.appendChild(ov)
+      ov.addEventListener('click', (e) => {
+        if (e.target === ov || e.target.id === 'qiv-close') ov.classList.add('hidden')
+      })
+      const img = ov.querySelector('#qiv-img')
+      ov._zoom = attachZoom(ov, img)
+      ov.querySelector('#qiv-zoom-in').addEventListener('click', (e) => { e.stopPropagation(); ov._zoom.zoomIn() })
+      ov.querySelector('#qiv-zoom-out').addEventListener('click', (e) => { e.stopPropagation(); ov._zoom.zoomOut() })
+      ov.querySelector('#qiv-reset').addEventListener('click', (e) => { e.stopPropagation(); ov._zoom.reset() })
+    }
+    ov.querySelector('#qiv-img').src = src
+    ov._zoom?.reset()
+    ov.classList.remove('hidden')
   }
 
   function startTimer(seconds) {
@@ -284,6 +345,7 @@ export async function render(root, ctx) {
       ;(st.index < total() - 1 ? advance : finish)()
     }
     zone.innerHTML = `
+      <img class="q-wiz-fb" src="/wizard/${ok ? 'wizard-celebrating' : 'wizard-encouraging'}.png" alt="" />
       <div class="feedback-banner ${ok ? 'good' : 'bad'}">
         ${ok ? icon('check') : icon('x')}
         <div>
@@ -299,7 +361,7 @@ export async function render(root, ctx) {
         <p class="faint" style="font-size:11.5px;text-align:center;margin-bottom:8px">Schedule next review</p>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
           <button class="btn srs-btn srs-again" data-grade="again">Again</button>
-          <button class="btn srs-btn srs-hard" data-grade="hard">Good</button>
+          <button class="btn srs-btn srs-hard" data-grade="hard">Hard</button>
           <button class="btn srs-btn srs-good" data-grade="good">Good</button>
           <button class="btn srs-btn srs-easy" data-grade="easy">Easy</button>
         </div>
@@ -375,21 +437,32 @@ export async function render(root, ctx) {
       const inputEl = root2.querySelector('#id-input')
       ok = checkTyped(inputEl?.value ?? '', q.answer)
       if (inputEl) inputEl.setAttribute('disabled', '')
+    } else {
+      return
     }
 
-    const correctText = q.type === 'id'
-      ? q.answer
-      : q.type === 'tf'
-        ? String(q.answer)
-        : q.options?.[q.answerIndex] ?? q.choices?.[q.answerIndex]
-    let chosenText = null
-    if (q.type === 'mcq' || q.type === 'fib') chosenText = choice != null ? (q.options ?? q.choices)?.[choice] ?? null : null
-    else if (q.type === 'tf') chosenText = choice === true ? 'True' : choice === false ? 'False' : null
-    else if (q.type === 'id') chosenText = root2.querySelector('#id-input')?.value?.trim() ?? null
+    finishAnswer(ok, chosenTextFor(q, choice))
+  }
+
+  function chosenTextFor(q, choice) {
+    if (q.type === 'mcq' || q.type === 'fib') return choice != null ? (q.options ?? q.choices)?.[choice] ?? null : null
+    if (q.type === 'tf') return choice === true ? 'True' : choice === false ? 'False' : null
+    if (q.type === 'id') return root2.querySelector('#id-input')?.value?.trim() ?? null
+    return null
+  }
+
+  async function finishAnswer(ok, chosenText) {
+    const q = currentQ()
+    const correctText = q.type === 'id' ? q.answer
+      : q.type === 'tf' ? String(q.answer)
+      : q.type === 'short' ? q.answer
+      : q.type === 'ordering' ? q.steps.join(' → ')
+      : q.type === 'matching' ? q.pairs.map(p => p.left).join(', ')
+      : q.options?.[q.answerIndex] ?? q.choices?.[q.answerIndex]
 
     st.answers.push({
       type: q.type,
-      sentence: q.meta?.sentence || q.statement || '',
+      sentence: q.meta?.sentence || q.statement || q.prompt || '',
       term: q.meta?.term || q.answer,
       chosen: chosenText,
       correct: correctText,
@@ -441,8 +514,100 @@ export async function render(root, ctx) {
       const inp = root2.querySelector('#id-input')
       inp.focus({ preventScroll: true })
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit() })
+    } else if (q.type === 'matching') {
+      wireMatching(q)
+    } else if (q.type === 'ordering') {
+      wireOrdering(q)
+    } else if (q.type === 'short') {
+      const submit = () => submitShort(root2.querySelector('#short-input').value)
+      root2.querySelector('#short-submit').addEventListener('click', submit)
+      const inp = root2.querySelector('#short-input')
+      inp.focus({ preventScroll: true })
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit() })
     }
     root2.querySelector('#quit-btn').addEventListener('click', confirmQuit)
+  }
+
+  function wireMatching(q) {
+    const leftBtns = [...root2.querySelectorAll('.match-left')]
+    const rightBtns = [...root2.querySelectorAll('.match-right')]
+    const links = {} // leftIndex -> right button element
+    let pickedLeft = null
+    function refresh() {
+      const complete = Object.keys(links).length === q.pairs.length
+      const btn = root2.querySelector('#match-submit')
+      if (btn) btn.disabled = !complete
+    }
+    leftBtns.forEach(lb => lb.addEventListener('click', () => {
+      leftBtns.forEach(b => b.classList.remove('sel'))
+      lb.classList.add('sel')
+      pickedLeft = lb
+    }))
+    rightBtns.forEach(rb => rb.addEventListener('click', () => {
+      if (!pickedLeft) return
+      const prevLeft = Object.keys(links).find(k => links[k] === rb)
+      if (prevLeft != null) delete links[prevLeft]
+      links[pickedLeft.dataset.left] = rb
+      rightBtns.forEach(b => b.classList.remove('linked'))
+      leftBtns.forEach(b => b.classList.remove('linked'))
+      rb.classList.add('linked')
+      pickedLeft.classList.add('linked')
+      pickedLeft.classList.remove('sel')
+      pickedLeft = null
+      refresh()
+    }))
+    root2.querySelector('#match-submit').addEventListener('click', () => {
+      let ok = true
+      for (let i = 0; i < q.pairs.length; i++) {
+        const rb = links[i]
+        const correct = rb && Number(rb.dataset.pair) === i
+        if (!correct) ok = false
+        rb?.classList.add(correct ? 'correct' : 'wrong')
+        leftBtns[i].classList.add(correct ? 'correct' : 'wrong')
+      }
+      finishAnswer(ok, `Matched ${Object.keys(links).filter(k => Number(links[k].dataset.pair) === Number(k)).length}/${q.pairs.length}`)
+    })
+  }
+
+  function wireOrdering(q) {
+    const pool = root2.querySelector('#order-pool')
+    const answerEl = root2.querySelector('#order-answer')
+    const chosen = [] // original step indices, in selected order
+    function render() {
+      pool.innerHTML = q.shuffled
+        .filter(si => !chosen.includes(si))
+        .map(si => `<button class="order-cell" data-step="${si}">${esc(q.steps[si])}</button>`).join('')
+      answerEl.innerHTML = chosen
+        .map((si, k) => `<button class="order-ans" data-k="${k}"><span class="order-pos">${k + 1}</span>${esc(q.steps[si])}</button>`).join('')
+      const submit = root2.querySelector('#order-submit')
+      if (submit) submit.disabled = chosen.length !== q.steps.length
+      pool.querySelectorAll('.order-cell').forEach(b =>
+        b.addEventListener('click', () => { chosen.push(Number(b.dataset.step)); render() })
+      )
+      answerEl.querySelectorAll('.order-ans').forEach(b =>
+        b.addEventListener('click', () => { chosen.splice(Number(b.dataset.k), 1); render() })
+      )
+    }
+    render()
+    root2.querySelector('#order-submit').addEventListener('click', () => {
+      let ok = chosen.every((si, k) => si === k)
+      answerEl.querySelectorAll('.order-ans').forEach((b, k) =>
+        b.classList.add(chosen[k] === k ? 'correct' : 'wrong')
+      )
+      finishAnswer(ok, `Order: ${chosen.map(si => q.steps[si]).join(' → ')}`)
+    })
+  }
+
+  async function submitShort(val) {
+    if (locked) return
+    locked = true
+    stopTimer()
+    const q = currentQ()
+    const text = (val || '').trim()
+    let ok = checkTyped(text, q.answer)
+    const graded = await gradeShortAnswer(text, q).catch(() => null)
+    if (graded != null) ok = graded
+    finishAnswer(ok, text)
   }
 
   function advance() {
@@ -491,12 +656,22 @@ export async function render(root, ctx) {
       challenge: st.challenge || null,
       cfg: { timerSec: cfg?.timerSec || 0 },
       byType,
-      review: session.map((q, i) => ({
-        prompt: q.statement || q.stem || q.clue,
-        answer: q.type === 'id' ? q.answer : q.type === 'tf' ? String(q.answer) : (q.options ?? q.choices)[q.answerIndex],
-        chosen: st.answers[i]?.chosen ?? null,
-        ok: st.answers[i]?.userOk
-      })),
+      review: session.map((q, i) => {
+        let prompt = q.statement || q.stem || q.clue || q.prompt || ''
+        let answer = q.type === 'id' || q.type === 'short'
+          ? q.answer
+          : q.type === 'tf'
+            ? String(q.answer)
+            : (q.options ?? q.choices)?.[q.answerIndex]
+        if (q.type === 'matching') {
+          prompt = `Match terms: ${(q.pairs || []).map(p => p.left).join(' / ')}`
+          answer = (q.pairs || []).map(p => `${p.left} → ${p.right}`).join('  |  ')
+        } else if (q.type === 'ordering') {
+          prompt = q.prompt || 'Put the steps in order'
+          answer = (q.steps || []).join(' → ')
+        }
+        return { prompt, answer, chosen: st.answers[i]?.chosen ?? null, ok: st.answers[i]?.userOk }
+      }),
       questions: session.map(q => ({ ...q }))
     }
     if (!st.mistakeMode && doc) delete ctx.state.cachedQuiz[doc.id]
@@ -571,8 +746,8 @@ export async function render(root, ctx) {
     }
   }
   document.addEventListener('keydown', keyHandler)
+  quizKeyCleanup = removeKeyHandler
 
   window.__quizSession = { session, st, cfg, doc }
-  void typeLabel
   draw()
 }

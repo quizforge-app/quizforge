@@ -1,4 +1,6 @@
-import { getDoc } from '../../lib/storage.js'
+import {
+  getDoc, srsIdFor, getSrsItem, upsertSrsFromMistake, gradeSrsItem, bankMistake
+} from '../../lib/storage.js'
 import { buildDeck } from '../../lib/flashcards.js'
 import { icon } from '../icons.js'
 import { esc } from '../helpers.js'
@@ -92,9 +94,19 @@ export async function render(root, ctx) {
     inner.classList.toggle('flipped', flipped)
   }
 
-  function advance(knewIt) {
+  async function advance(knewIt) {
     const card = currentCard()
     if (!card) return
+    // Feed the spaced-repetition scheduler. "Got it" = good, "Again" = again
+    // (and banked as a mistake so it surfaces in the weakness review too).
+    try {
+      const id = srsIdFor(doc.id, card.term, card.back)
+      if (!(await getSrsItem(id))) {
+        await upsertSrsFromMistake({ docId: doc.id, sentence: card.back, term: card.term, type: 'id' })
+      }
+      await gradeSrsItem(id, knewIt ? 'good' : 'again')
+      if (!knewIt) await bankMistake({ docId: doc.id, sentence: card.back, term: card.term, type: 'id' }).catch(() => {})
+    } catch { /* scheduling is best-effort */ }
     if (knewIt) {
       index++
     } else {

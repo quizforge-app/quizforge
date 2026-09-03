@@ -6,7 +6,7 @@ import { oneLineSummary } from '../../lib/summarize.js'
 import { transcribeImage } from '../../lib/llm/transcribe.js'
 import { hasApiKey } from '../../lib/llm/gemini.js'
 import { icon } from '../icons.js'
-import { esc } from '../helpers.js'
+import { esc, sectionTitle, chipRow, chip, muted } from '../helpers.js'
 import { dropzoneArt } from '../art.js'
 
 function fileToDataUrl(file) {
@@ -16,6 +16,28 @@ function fileToDataUrl(file) {
     fr.onerror = () => reject(new Error('read_failed'))
     fr.readAsDataURL(file)
   })
+}
+
+// Downscale a photo to a sane resolution and re-encode as JPEG so we upload far
+// less data to Gemini and store far less on device. Sending a 12MP original as
+// base64 is slow, memory-heavy, and usually OOMs low-end Android.
+async function downscaleImage(file, maxDim = 1600, quality = 0.82) {
+  try {
+    const bmp = await createImageBitmap(file)
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height))
+    const w = Math.max(1, Math.round(bmp.width * scale))
+    const h = Math.max(1, Math.round(bmp.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const c = canvas.getContext('2d')
+    c.drawImage(bmp, 0, 0, w, h)
+    bmp.close?.()
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality))
+    return blob || file
+  } catch {
+    return file
+  }
 }
 
 export async function render(root, ctx) {
@@ -38,25 +60,19 @@ export async function render(root, ctx) {
           <div class="dropzone-illust">${dropzoneArt}</div>
           <h3>Tap to choose a file</h3>
           <p>or drag &amp; drop it here</p>
-          <input type="file" id="file-input" accept=".pdf,.docx,.pptx,.txt,.md" hidden />
+          <input type="file" id="file-input" accept=".pdf,.docx,.pptx,.txt,.md" aria-label="Choose a document file" hidden />
         </div>
         <div class="fmt-row">
-          <span class="chip on">PDF</span>
-          <span class="chip on">DOCX</span>
-          <span class="chip on">PPTX</span>
-          <span class="chip on">TXT</span>
-          <span class="chip on">MD</span>
+          ${chipRow(['PDF', 'DOCX', 'PPTX', 'TXT', 'MD'].map(f => chip(f, { active: true })))}
         </div>
-        <p class="center muted" style="font-size:12.5px;margin-top:22px;line-height:1.6">
-          Your file never leaves this device.<br/>Text is extracted and stored locally.
-        </p>
+        ${muted('Your file is processed locally on this device.<br/>Text is extracted and stored locally.', { style: 'font-size:12.5px;margin-top:22px;line-height:1.6', tag: 'p' })}
       </div>
 
       <div id="paste-stage" class="hidden">
         <div class="card">
-          <label class="section-title" style="margin:0 0 8px">Document name</label>
+          <label class="section-title" for="paste-name" style="margin:0 0 8px">Document name</label>
           <input class="text-input" id="paste-name" maxlength="80" placeholder="e.g. Lecture 4 notes" />
-          <label class="section-title" style="margin:16px 0 8px">Paste your notes or text</label>
+          <label class="section-title" for="paste-area" style="margin:16px 0 8px">Paste your notes or text</label>
           <textarea id="paste-area" class="text-area" placeholder="Paste the text you want to study here…" rows="10"></textarea>
         </div>
         <button class="btn btn-primary" id="paste-save" style="margin-top:18px">${icon('check')} Save to Library</button>
@@ -64,15 +80,21 @@ export async function render(root, ctx) {
       </div>
 
       <div id="photo-stage" class="hidden">
-        <div class="dropzone" id="photo-drop" data-tooltip="Photo of a board, slide, page or notes">
-          <div class="dropzone-illust">${icon('camera')}</div>
-          <h3>Take or choose a photo</h3>
-          <p>boards · slides · pages · screenshots</p>
-          <input type="file" id="photo-input" accept="image/*" capture hidden />
+        <div class="photo-opts">
+          <button class="photo-opt" id="photo-take" data-tooltip="Use your camera">
+            <div class="photo-opt-ico">${icon('camera')}</div>
+            <div class="photo-opt-label">Take a photo</div>
+            <div class="photo-opt-sub">single camera shot</div>
+          </button>
+          <button class="photo-opt" id="photo-choose" data-tooltip="Pick from your gallery">
+            <div class="photo-opt-ico">${icon('images')}</div>
+            <div class="photo-opt-label">Choose photos</div>
+            <div class="photo-opt-sub">one or more</div>
+          </button>
         </div>
-        <p class="center muted" style="font-size:12.5px;margin-top:22px;line-height:1.6">
-          Gemini reads the text from your photo,<br/>then turns it into a study set. Try a clear, flat shot.
-        </p>
+        <input type="file" id="photo-capture-input" accept="image/*" capture aria-label="Take a photo" hidden />
+        <input type="file" id="photo-input" accept="image/*" multiple aria-label="Choose photos" hidden />
+        ${muted('Gemini reads the text from your photo(s),<br/>then turns it into a study set. Try a clear, flat shot.', { style: 'font-size:12.5px;margin-top:22px;line-height:1.6', tag: 'p' })}
       </div>
 
       <div id="progress-stage" class="hidden">
@@ -82,12 +104,12 @@ export async function render(root, ctx) {
 
       <div id="result-stage" class="hidden">
         <div class="card" style="margin-top:10px">
-          <label class="section-title" style="margin:0 0 8px">Document name</label>
+          <label class="section-title" for="doc-name-input" style="margin:0 0 8px">Document name</label>
           <input class="text-input" id="doc-name-input" maxlength="80" />
-          <label class="section-title" style="margin:16px 0 8px">${icon('folder')} Folder <span style="text-transform:none;font-weight:500;color:var(--text-faint)">(optional)</span></label>
+          <label class="section-title" for="doc-folder-input" style="margin:16px 0 8px">${icon('folder')} Folder <span style="text-transform:none;font-weight:500;color:var(--text-faint)">(optional)</span></label>
           <input class="text-input" id="doc-folder-input" list="folder-list" maxlength="40" placeholder="e.g. Biology 101" autocomplete="off" />
           <datalist id="folder-list">${folders.map(f => `<option value="${esc(f)}"></option>`).join('')}</datalist>
-          <label class="section-title" style="margin:16px 0 8px">${icon('tag')} Tags <span style="text-transform:none;font-weight:500;color:var(--text-faint)">(comma separated)</span></label>
+          <label class="section-title" for="doc-tags-input" style="margin:16px 0 8px">${icon('tag')} Tags <span style="text-transform:none;font-weight:500;color:var(--text-faint)">(comma separated)</span></label>
           <input class="text-input" id="doc-tags-input" maxlength="120" placeholder="exam, chapter 3, vocab" autocomplete="off" />
           <div class="row" style="padding:14px 0 4px">
             <div><div class="label">Words extracted</div></div>
@@ -139,12 +161,25 @@ export async function render(root, ctx) {
     if (fileInput.files.length) handleFile(fileInput.files[0])
   })
 
-  root.querySelector('#photo-drop').addEventListener('click', () => {
+  function requirePhotoKey(then) {
     if (!hasApiKey()) { ctx.toast('Add a Gemini key in Settings to read photos', true); return }
-    root.querySelector('#photo-input').click()
+    then()
+  }
+  root.querySelector('#photo-take').addEventListener('click', () => {
+    requirePhotoKey(() => root.querySelector('#photo-capture-input').click())
+  })
+  root.querySelector('#photo-capture-input').addEventListener('change', () => {
+    const f = root.querySelector('#photo-capture-input').files[0]
+    if (f) handlePhoto([f])
+    root.querySelector('#photo-capture-input').value = ''
+  })
+  root.querySelector('#photo-choose').addEventListener('click', () => {
+    requirePhotoKey(() => root.querySelector('#photo-input').click())
   })
   root.querySelector('#photo-input').addEventListener('change', () => {
-    if (root.querySelector('#photo-input').files.length) handlePhoto(root.querySelector('#photo-input').files[0])
+    const files = [...root.querySelector('#photo-input').files].filter(f => f.type.startsWith('image/'))
+    if (files.length) handlePhoto(files)
+    root.querySelector('#photo-input').value = ''
   })
 
   root.querySelector('#paste-save').addEventListener('click', () => {
@@ -190,7 +225,7 @@ export async function render(root, ctx) {
 
       await new Promise(r => setTimeout(r, 350))
       stepItems[2].classList.replace('active', 'done')
-      showExtracted({ name: file.name.replace(/\.(pdf|docx|pptx|txt|md|markdown)$/i, ''), type, text, images })
+      showExtracted({ name: file.name.replace(/\.(pdf|docx|pptx|txt|md|markdown)$/i, ''), type, text, images, file })
     } catch (err) {
       console.error(err)
       ctx.toast(err.message || 'Could not read this file', true)
@@ -201,31 +236,47 @@ export async function render(root, ctx) {
     }
   }
 
-  async function handlePhoto(file) {
-    if (!file.type.startsWith('image/')) { ctx.toast('Choose an image file', true); return }
+  async function handlePhoto(files) {
+    const images = [...files].filter(f => f.type.startsWith('image/'))
+    if (!images.length) { ctx.toast('Choose image files', true); return }
+    const n = images.length
     stages.progress.classList.remove('hidden')
     stages.photo.classList.add('hidden')
-    root.querySelector('#extract-filename').textContent = file.name || 'Photo'
+    root.querySelector('#extract-filename').textContent = n === 1 ? (images[0].name || 'Photo') : `${n} photos`
     const stepsEl = root.querySelector('#steps')
     stepsEl.innerHTML = `
-      <div class="step-item active"><div class="step-dot">${icon('check')}</div><div class="step-label">Reading image…</div></div>
+      <div class="step-item active"><div class="step-dot">${icon('check')}</div><div class="step-label">Reading ${n} image${n === 1 ? '' : 's'}…</div></div>
       <div class="step-item"><div class="step-dot">${icon('check')}</div><div class="step-label">Transcribing with Gemini…</div></div>`
     const stepItems = [...stepsEl.querySelectorAll('.step-item')]
     try {
-      const dataUrl = await fileToDataUrl(file)
-      const text = await transcribeImage(dataUrl, { maxOutputTokens: 4096 })
-      if (!text.trim()) throw new Error('No readable text found in that image')
+      const parts = []
+      const blobs = []
+      for (let i = 0; i < n; i++) {
+        try {
+          const small = await downscaleImage(images[i])
+          blobs.push(small)
+          const dataUrl = await fileToDataUrl(small)
+          const text = await transcribeImage(dataUrl, { maxOutputTokens: 4096 })
+          if (text && text.trim()) parts.push(text.trim())
+        } catch (e) {
+          console.warn('photo transcribe failed', e)
+        }
+      }
       stepItems[1].classList.add('active')
       stepItems[1].classList.replace('active', 'done')
+      stepItems[0].classList.replace('active', 'done')
+      const combined = parts.join('\n\n')
+      if (!combined.trim()) throw new Error('No readable text found in those images')
       showExtracted({
-        name: (file.name || 'Photo notes').replace(/\.[^.]+$/, '') || 'Photo notes',
+        name: (images[0].name || 'Photo notes').replace(/\.[^.]+$/, '') || 'Photo notes',
         type: 'image',
-        text,
-        images: [{ blob: file, mimeType: file.type, index: 0, slideNumber: 1 }]
+        text: combined,
+        images: blobs.map((b, i) => ({ blob: b, mimeType: b.type || 'image/jpeg', index: i, slideNumber: i + 1 })),
+        file: null
       })
     } catch (err) {
       console.error(err)
-      ctx.toast(err.message || 'Could not read this photo', true)
+      ctx.toast(err.message || 'Could not read these photos', true)
       showStage('photo')
     }
   }
@@ -236,8 +287,8 @@ export async function render(root, ctx) {
     })
   }
 
-  function showExtracted({ name, type, text, images = [] }) {
-    extracted = { name, type, text, images }
+  function showExtracted({ name, type, text, images = [], file = null }) {
+    extracted = { name, type, text, images, file }
     const words = (text.match(/\S+/g) || []).length
     const { topics } = detectTopics(text)
     extracted.topics = topics
@@ -267,7 +318,7 @@ export async function render(root, ctx) {
     const folder = root.querySelector('#doc-folder-input').value.trim() || null
     const tags = root.querySelector('#doc-tags-input').value
       .split(',').map(t => t.trim()).filter(Boolean).slice(0, 12)
-    const doc = await saveDoc({ name, type: extracted.type, text: extracted.text, topics: extracted.topics || [], folder, tags })
+    const doc = await saveDoc({ name, type: extracted.type, text: extracted.text, topics: extracted.topics || [], folder, tags, original: extracted.file })
     if (extracted.images?.length) {
       await saveDocImages(doc.id, extracted.images.map((img, i) => ({ ...img, index: i })))
     }

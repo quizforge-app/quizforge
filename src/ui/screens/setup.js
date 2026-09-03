@@ -1,13 +1,13 @@
-import { getDoc } from '../../lib/storage.js'
+import { getDoc, getWeakTerms } from '../../lib/storage.js'
 import { hasApiKey } from '../../lib/llm/gemini.js'
 import { icon } from '../icons.js'
-import { esc, typeLabel } from '../helpers.js'
+import { esc, typeLabel, sectionTitle, chipRow, chip } from '../helpers.js'
 import { TYPE_META, estimateAvailable, generateQuiz } from '../../lib/quizgen.js'
 import { generateQuizAI } from '../../lib/llm/quiz-ai.js'
 import { detectTopics } from '../../lib/topics.js'
 import { showShareModal } from '../shareModal.js'
 
-const ALL_TYPES = ['mcq', 'tf', 'fib', 'id']
+const ALL_TYPES = ['mcq', 'tf', 'fib', 'id', 'matching', 'ordering', 'short']
 
 export async function render(root, ctx) {
   const doc = await getDoc(ctx.state.currentDocId)
@@ -21,6 +21,8 @@ export async function render(root, ctx) {
   let timerSec = cfg.timerSec
   let fresh = cfg.fresh
   let aiOn = cfg.ai !== false
+  let focusWeak = !!cfg.focusWeak
+  let deepVisual = cfg.deepVisual !== false
   const detectedTopics = Array.isArray(doc.topics) && doc.topics.length ? doc.topics : detectTopics(doc.text).topics
   const selectedTopics = new Set(cfg.topics || [])
   let maxAvailable = estimateAvailable(doc, { ...cfg, topics: [...selectedTopics] })
@@ -41,7 +43,7 @@ export async function render(root, ctx) {
         </div>
       </div>
 
-      <div class="section-title">Number of questions</div>
+      ${sectionTitle('Number of questions')}
       <div class="card row" style="padding:13px 16px;border-top:none">
         <span class="label">Questions</span>
         <div class="stepper" data-tooltip="How many questions to generate (1–200)">
@@ -51,7 +53,7 @@ export async function render(root, ctx) {
         </div>
       </div>
       <p class="faint" id="pool-hint" style="font-size:12px;margin:8px 4px 0"></p>
-      <div class="section-title">Question types</div>
+      ${sectionTitle('Question types')}
       <div class="type-grid">
         ${ALL_TYPES.map(t => `
           <button class="type-card ${mix[t] ? 'on' : ''}" data-type="${t}" data-tooltip="${typeTip(t)}">
@@ -62,7 +64,7 @@ export async function render(root, ctx) {
       </div>
 
       ${detectedTopics.length ? `
-      <div class="section-title">Topics in this document</div>
+      ${sectionTitle('Topics in this document')}
       <div class="chip-row" id="topic-row">
         <button class="chip ${selectedTopics.size === 0 ? 'on' : ''}" data-topic-all data-tooltip="Include every topic in the quiz">All topics</button>
         ${detectedTopics.map(t => `
@@ -72,14 +74,14 @@ export async function render(root, ctx) {
       </div>
       <p class="faint" id="topic-hint" style="font-size:12px;margin:8px 4px 0"></p>` : ''}
 
-      <div class="section-title">Difficulty</div>
+      ${sectionTitle('Difficulty')}
       <div class="seg" id="diff-seg" data-tooltip="Easier = common terms · Harder = rare terms">
         <button data-diff="easy" class="${difficulty === 'easy' ? 'on' : ''}" data-tooltip="Common, frequently-appearing terms">Easy</button>
         <button data-diff="medium" class="${difficulty === 'medium' ? 'on' : ''}" data-tooltip="Balanced mix of terms">Medium</button>
         <button data-diff="hard" class="${difficulty === 'hard' ? 'on' : ''}" data-tooltip="Rare, specific technical terms">Hard</button>
       </div>
 
-      <div class="section-title">Options</div>
+      ${sectionTitle('Options')}
       <div class="card" style="padding:2px 16px;border-top:1px solid var(--border)">
         <div class="row" data-tooltip="Google Gemini writes complete exam-style questions from the parsed content">
           <div><div class="label">AI-written questions</div><div class="sub">${hasApiKey() ? 'Gemini · key set' : 'Gemini · add a free key in Settings'}</div></div>
@@ -98,6 +100,14 @@ export async function render(root, ctx) {
         <div class="row" style="border-bottom:none" data-tooltip="On = brand-new questions each time; Off = identical quiz">
           <div><div class="label">Fresh questions each attempt</div><div class="sub">Regenerate from the document instead of repeating</div></div>
           <div class="switch ${fresh ? 'on' : ''}" id="sw-fresh" data-tooltip="Toggle fresh generation"></div>
+        </div>
+        <div class="row" style="border-bottom:none" data-tooltip="Weight questions toward terms you've gotten wrong before, across all your quizzes">
+          <div><div class="label">Focus my weak spots</div><div class="sub">Bias generation toward your past mistakes</div></div>
+          <div class="switch ${focusWeak ? 'on' : ''}" id="sw-weak" data-tooltip="Toggle weakness-aware generation"></div>
+        </div>
+        <div class="row" style="border-bottom:none" data-tooltip="Gemini analyzes page images, diagrams, code & charts; GLM writes the questions so you're quizzed on the visuals too">
+          <div><div class="label">Deep visual analysis</div><div class="sub">Questions from diagrams, code & charts</div></div>
+          <div class="switch ${deepVisual ? 'on' : ''}" id="sw-visual" data-tooltip="Toggle visual analysis"></div>
         </div>
       </div>
 
@@ -221,16 +231,30 @@ export async function render(root, ctx) {
     fresh = !fresh
     e.currentTarget.classList.toggle('on', fresh)
   })
+  root.querySelector('#sw-weak').addEventListener('click', e => {
+    focusWeak = !focusWeak
+    e.currentTarget.classList.toggle('on', focusWeak)
+  })
+  root.querySelector('#sw-visual').addEventListener('click', e => {
+    deepVisual = !deepVisual
+    e.currentTarget.classList.toggle('on', deepVisual)
+  })
 
   root.querySelector('#back-btn').addEventListener('click', () => ctx.go('library'))
   root.querySelector('#theme-btn').addEventListener('click', () => ctx.toggleTheme())
-  root.querySelector('#start-btn').addEventListener('click', () => {
-    ctx.saveConfig(doc.id, {
+  root.querySelector('#start-btn').addEventListener('click', async () => {
+    const save = {
       count, mix: { ...mix }, difficulty, shuffle: shuffleOn, timerSec, fresh,
       topics: [...selectedTopics],
       ai: aiOn,
+      focusWeak,
+      deepVisual,
       fixedSeed: null
-    })
+    }
+    if (focusWeak) {
+      try { save.weakTerms = await getWeakTerms(doc.id) } catch { save.weakTerms = [] }
+    }
+    ctx.saveConfig(doc.id, save)
     ctx.go('quiz')
   })
 
@@ -240,7 +264,10 @@ export async function render(root, ctx) {
     btn.disabled = true
     btn.textContent = 'Generating…'
     try {
-      const cfg = { count, mix: { ...mix }, difficulty, shuffle: shuffleOn, timerSec, fresh, topics: [...selectedTopics], ai: aiOn }
+      const cfg = { count, mix: { ...mix }, difficulty, shuffle: shuffleOn, timerSec, fresh, topics: [...selectedTopics], ai: aiOn, focusWeak, deepVisual }
+      if (focusWeak) {
+        try { cfg.weakTerms = await getWeakTerms(doc.id) } catch { cfg.weakTerms = [] }
+      }
       let gen = null
       if (cfg.ai && hasApiKey()) {
         gen = await generateQuizAI(doc, cfg, () => {})
@@ -269,7 +296,10 @@ function typeGlyph(t) {
     mcq: icon('listChecks'),
     tf: icon('check'),
     fib: icon('fileText'),
-    id: icon('target')
+    id: icon('target'),
+    matching: icon('gitCompare'),
+    ordering: icon('listOrdered'),
+    short: icon('edit')
   }[t]
 }
 
@@ -278,7 +308,10 @@ function typeSub(t) {
     mcq: 'Pick from 4 choices',
     tf: 'Judge the statement',
     fib: 'Complete the sentence',
-    id: 'Name the missing term'
+    id: 'Name the missing term',
+    matching: 'Match terms to definitions',
+    ordering: 'Put steps in order',
+    short: 'Write a short answer'
   }[t]
 }
 function typeTip(t) {
@@ -286,6 +319,9 @@ function typeTip(t) {
     mcq: 'Choose the correct answer from 4 options',
     tf: 'Decide if the statement is true or false',
     fib: 'Fill the blank — complete the sentence',
-    id: 'Type the term that matches the description'
+    id: 'Type the term that matches the description',
+    matching: 'Pair each term with the sentence that defines it',
+    ordering: 'Arrange the shuffled steps into the correct sequence',
+    short: 'Type a short phrase — graded automatically'
   }[t]
 }

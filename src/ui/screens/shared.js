@@ -1,5 +1,6 @@
 import { icon } from '../icons.js'
 import { decodeShare, linkFromEncoded } from '../../lib/share.js'
+import { saveDeck } from '../../lib/storage.js'
 import { esc } from '../helpers.js'
 
 export async function render(root, ctx) {
@@ -44,6 +45,7 @@ export async function render(root, ctx) {
           <p class="faint" style="margin-top:10px">Can you beat them?</p>` : ''}
         <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;justify-content:center">
           <button class="btn btn-primary" id="start">${icon('play')} ${isChallenge ? 'Take the challenge' : 'Start quiz'}</button>
+          <button class="btn btn-secondary" id="save">${icon('layers')} Save to library</button>
           <button class="btn btn-secondary" id="copy">${icon('link')} Copy link</button>
         </div>
       </div>
@@ -65,6 +67,19 @@ export async function render(root, ctx) {
       ctx.toast('Link copied')
     } catch {
       ctx.toast('Could not copy', true)
+    }
+  })
+
+  root.querySelector('#save').addEventListener('click', async e => {
+    const btn = e.currentTarget
+    btn.disabled = true
+    try {
+      await saveDeck({ name: title, questions: payload.q, source: isChallenge ? 'challenge' : 'shared' })
+      ctx.toast('Saved to your library')
+      btn.textContent = icon('check') + ' Saved'
+    } catch {
+      ctx.toast('Could not save', true)
+      btn.disabled = false
     }
   })
 }

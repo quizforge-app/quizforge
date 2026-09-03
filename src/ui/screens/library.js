@@ -1,7 +1,8 @@
-import { listDocs, deleteDoc, loadSettings, saveSettings, deriveFolders, deriveTags } from '../../lib/storage.js'
+import { listDocs, deleteDoc, loadSettings, saveSettings, deriveFolders, deriveTags, listDecks, deleteDeck } from '../../lib/storage.js'
 import { icon } from '../icons.js'
-import { typeLabel, scorePill, fmtDate, esc } from '../helpers.js'
+import { typeLabel, scorePill, fmtDate, esc, statsRow, sectionTitle, btn } from '../helpers.js'
 import { emptyLibraryArt } from '../art.js'
+import { confirmModal } from '../confirmModal.js'
 
 const SORTS = [
   { id: 'recent', label: 'Recent' },
@@ -12,6 +13,7 @@ const SORTS = [
 export async function render(root, ctx) {
   const docs = await listDocs()
   ctx.state.docs = docs
+  const decks = await listDecks().catch(() => [])
 
   const settings = loadSettings()
   let query = ''
@@ -25,10 +27,18 @@ export async function render(root, ctx) {
   const totalAttempts = docs.reduce((s, d) => s + (d.attempts || 0), 0)
   const scored = docs.filter(d => d.bestScore != null)
   const avg = scored.length ? Math.round(scored.reduce((s, d) => s + d.bestScore, 0) / scored.length) : null
+  // The stats row below already shows documents/quizzes/score, so the hero
+  // subtitle stays qualitative — no repeated numbers.
+  let subtitle
+  if (!totalAttempts) subtitle = 'Pick a document and forge your first quiz.'
+  else if (avg != null && avg >= 80) subtitle = 'Mastery within reach — keep the streak alive.'
+  else if (avg != null && avg >= 50) subtitle = 'Steady progress. Review your weak spots to level up.'
+  else if (avg != null) subtitle = 'Every miss banks a lesson — review and try again.'
+  else subtitle = 'Your quizzes are waiting.'
 
   let html = `
     <header class="app-header">
-      <div class="brand"><span class="mark">${icon('logo')}</span>QuizForge</div>
+      <div class="brand"><span class="mark">${icon('logo')}</span>Quizard</div>
       <div style="display:flex;gap:2px;align-items:center">
         <button class="avatar-chip" id="account-btn" data-tooltip="Switch account — ${esc(ctx.state.account?.name || 'account')}" style="background:${ctx.state.account?.color || '#475569'}">${esc((ctx.state.account?.name || '?').charAt(0).toUpperCase())}</button>
         <button class="icon-btn" id="settings-btn" aria-label="Settings" data-tooltip="Settings & backup">${icon('gear')}</button>
@@ -40,17 +50,20 @@ export async function render(root, ctx) {
 
   if (docs.length) {
     html += `
-      <div class="hero">
-        <h1>Your library</h1>
-        <p>${docs.length} document${docs.length === 1 ? '' : 's'} · ${totalAttempts} quiz${totalAttempts === 1 ? '' : 'zes'} taken${avg != null ? ` · ${avg}% average best score` : ''}</p>
+      <div class="hero lib-hero">
+        <img class="lib-wiz" src="/wizard/wizard-studying.png" alt="" />
+        <div>
+          <h1>Your library</h1>
+          <p>${subtitle}</p>
+        </div>
       </div>
-      <div class="stats-row">
-        <div class="stat"><div class="num">${docs.length}</div><div class="lbl">Documents</div></div>
-        <div class="stat"><div class="num">${totalAttempts}</div><div class="lbl">Quizzes</div></div>
-        <div class="stat"><div class="num">${avg != null ? avg + '%' : '—'}</div><div class="lbl">Best Avg</div></div>
-      </div>
+      ${statsRow([
+        { value: docs.length, label: 'Documents' },
+        { value: totalAttempts, label: 'Quizzes' },
+        { value: avg != null ? avg + '%' : '—', label: 'Best Avg' }
+      ])}
       <div class="lib-tools">
-        <input class="text-input" id="lib-search" type="search" placeholder="Search documents…" autocomplete="off" />
+        <input class="text-input" id="lib-search" type="search" placeholder="Search documents…" aria-label="Search documents" autocomplete="off" />
         <div class="seg" id="lib-sort">
           ${SORTS.map(s => `<button data-sort="${s.id}" class="${sort === s.id ? 'on' : ''}" data-tooltip="Sort by ${s.label.toLowerCase()}">${s.label}</button>`).join('')}
         </div>
@@ -78,6 +91,31 @@ export async function render(root, ctx) {
   }
 
   html += `<div class="doc-list" id="doc-list"></div>`
+
+  if (decks.length) {
+    html += `
+      ${sectionTitle('Saved quizzes')}
+      <p class="faint" style="font-size:12px;margin:0 4px 10px">Quizzes you saved from shared links — play them anytime, no link needed.</p>
+      <div class="doc-list" id="deck-list">
+        ${decks.map(dk => `
+          <div class="doc-card deck-card stagger" data-deck="${dk.id}" data-tooltip="Open saved quiz">
+            <div class="doc-icon saved">${icon('layers')}</div>
+            <div class="doc-info">
+              <div class="doc-name">${esc(dk.name)}</div>
+              <div class="doc-meta">
+                <span>${dk.questions.length} questions</span>
+                <span>·</span>
+                <span>${fmtDate(dk.updatedAt || dk.createdAt)}</span>
+                ${dk.source ? `<span class="doc-folder">${esc(dk.source)}</span>` : ''}
+              </div>
+            </div>
+            <div class="doc-actions">
+              <button class="btn btn-primary deck-play" data-deck="${dk.id}" data-tooltip="Play this saved quiz">${icon('play')} Play</button>
+              <button class="icon-btn deck-del" data-deck="${dk.id}" aria-label="Delete" data-tooltip="Delete saved quiz">${icon('trash')}</button>
+            </div>
+          </div>`).join('')}
+      </div>`
+  }
 
   if (!docs.length) {
     html += `
@@ -130,7 +168,7 @@ export async function render(root, ctx) {
         ? `<span class="score-pill ${scorePill(doc.bestScore)}">${doc.bestScore}%</span>`
         : ''
       return `
-      <div class="doc-card" data-id="${doc.id}" data-tooltip="Open document details">
+      <div class="doc-card stagger" data-id="${doc.id}" data-tooltip="Open document details">
         <div class="doc-icon ${doc.type}">${icon('fileText')}</div>
         <div class="doc-info">
           <div class="doc-name">${esc(doc.name)}</div>
@@ -144,43 +182,73 @@ export async function render(root, ctx) {
           <button class="btn btn-primary doc-quiz-btn" data-id="${doc.id}" data-tooltip="Create a quiz from this document">
             ${icon('play')} Quiz
           </button>
-          <button class="icon-btn doc-del-btn" data-id="${doc.id}" aria-label="Delete" data-tooltip="Delete document">${icon('trash')}</button>
+          <button class="btn btn-secondary doc-review-btn" data-id="${doc.id}" data-tooltip="Read this document as a study reviewer">
+            ${icon('book')} Reviewer
+          </button>
         </div>
       </div>`
     }).join('')
-    bindList()
+    ctx.stagger(listEl, '.stagger')
   }
 
-  function bindList() {
-    listEl.querySelectorAll('.doc-card').forEach(card =>
-      card.addEventListener('click', e => {
-        if (!(e.target instanceof Element) || e.target.closest('button')) return
-        ctx.go('docdetail', card.dataset.id)
-      })
-    )
-    listEl.querySelectorAll('.doc-quiz-btn').forEach(btn =>
-      btn.addEventListener('click', e => {
-        e.stopPropagation()
-        ctx.go('setup', btn.dataset.id)
-      })
-    )
-    listEl.querySelectorAll('.doc-del-btn').forEach(btn =>
-      btn.addEventListener('click', async e => {
-        e.stopPropagation()
-        const doc = ctx.state.docs.find(d => d.id === btn.dataset.id)
-        if (!confirm(`Delete "${doc.name}" and all its quiz history?\n\nThis cannot be undone.`)) return
-        await deleteDoc(btn.dataset.id)
-        ctx.toast('Document deleted')
+  // Single delegated click handler on the list (added once per render; the list
+  // element is recreated by root.innerHTML so no stale listeners accumulate).
+  listEl.addEventListener('click', async e => {
+    const del = e.target.closest('.doc-del-btn')
+    if (del) {
+      const doc = ctx.state.docs.find(d => d.id === del.dataset.id)
+      if (!doc) return
+      if (!await confirmModal(`Delete "${doc.name}"?`, `All quiz history for <b>${esc(doc.name)}</b> will be removed.`)) return
+      await deleteDoc(del.dataset.id)
+      ctx.toast('Document deleted')
+      ctx.refresh()
+      return
+    }
+    const quiz = e.target.closest('.doc-quiz-btn')
+    if (quiz) { ctx.go('setup', quiz.dataset.id); return }
+    const review = e.target.closest('.doc-review-btn')
+    if (review) { ctx.go('reviewer', review.dataset.id); return }
+    const card = e.target.closest('.doc-card')
+    if (card) ctx.go('docdetail', card.dataset.id)
+  })
+
+  const deckList = root.querySelector('#deck-list')
+  if (deckList) {
+    deckList.addEventListener('click', async e => {
+      const del = e.target.closest('.deck-del')
+      if (del) {
+        if (!await confirmModal('Delete saved quiz?', 'This saved quiz and its results will be removed.')) return
+        await deleteDeck(del.dataset.deck).catch(() => {})
+        ctx.toast('Saved quiz deleted')
         ctx.refresh()
-      })
-    )
+        return
+      }
+      const play = e.target.closest('.deck-play')
+      if (play) {
+        const deck = decks.find(d => d.id === play.dataset.deck)
+        if (!deck) return
+        ctx.state.sharedQuiz = { title: deck.name, questions: deck.questions, cfg: deck.cfg || { timerSec: 0 } }
+        ctx.go('quiz')
+        return
+      }
+      const dcard = e.target.closest('.deck-card')
+      if (dcard) {
+        const deck = decks.find(d => d.id === dcard.dataset.deck)
+        if (!deck) return
+        ctx.state.sharedQuiz = { title: deck.name, questions: deck.questions, cfg: deck.cfg || { timerSec: 0 } }
+        ctx.go('quiz')
+      }
+    })
   }
 
   const searchEl = root.querySelector('#lib-search')
-  searchEl?.addEventListener('input', () => {
-    query = searchEl.value.trim()
-    renderList()
-  })
+  if (searchEl) {
+    let t
+    searchEl.addEventListener('input', () => {
+      clearTimeout(t)
+      t = setTimeout(() => { query = searchEl.value.trim(); renderList() }, 120)
+    })
+  }
 
   root.querySelectorAll('#lib-sort button').forEach(b =>
     b.addEventListener('click', () => {

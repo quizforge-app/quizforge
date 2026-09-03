@@ -1,4 +1,4 @@
-import { listAccounts, createAccount, hashPin, verifyPin, setActiveAccount, getAccount, deleteAccount, accountHasData, updateAccount } from '../../lib/storage.js'
+import { listAccounts, createAccount, hashPin, verifyPin, setActiveAccount, getAccount, deleteAccount, accountHasData, updateAccount, saveSettings } from '../../lib/storage.js'
 import { icon } from '../icons.js'
 import { esc } from '../helpers.js'
 
@@ -21,7 +21,7 @@ async function renderPicker(root, ctx) {
 
   root.innerHTML = `
     <div class="acc-screen">
-      <div class="acc-brand"><span class="mark">${icon('logo')}</span>QuizForge</div>
+      <div class="acc-brand"><span class="mark">${icon('logo')}</span>Quizard</div>
       <h1 class="acc-title">Who's studying?</h1>
       <p class="acc-sub">Pick a profile to continue — progress is tracked separately for each.</p>
       <div class="acc-grid">
@@ -69,12 +69,12 @@ function renderCreate(root, ctx) {
 
   root.innerHTML = `
     <div class="acc-screen">
-      <div class="acc-brand"><span class="mark">${icon('logo')}</span>QuizForge</div>
+      <div class="acc-brand"><span class="mark">${icon('logo')}</span>Quizard</div>
       <h1 class="acc-title">Create your profile</h1>
       <p class="acc-sub">Your quizzes, progress and mistakes are tracked under this account.</p>
 
       <div class="acc-form">
-        <label class="section-title">Profile name</label>
+        <label class="section-title" for="acc-name">Profile name</label>
         <input class="text-input" id="acc-name" placeholder="e.g. Juan" maxlength="24" autocomplete="off" />
 
         <label class="section-title">Avatar color</label>
@@ -82,10 +82,10 @@ function renderCreate(root, ctx) {
           ${COLORS.map(c => `<button class="swatch ${c === color ? 'on' : ''}" data-color="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}
         </div>
 
-        <label class="section-title">PIN <span class="faint" style="text-transform:none;letter-spacing:0">(optional — protects this profile)</span></label>
+        <label class="section-title" for="acc-pin">PIN <span class="faint" style="text-transform:none;letter-spacing:0">(optional — protects this profile)</span></label>
         <div class="pin-row">
-          <input class="text-input pin-input" id="acc-pin" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off" />
-          <input class="text-input pin-input" id="acc-pin2" type="tel" inputmode="numeric" maxlength="4" placeholder="repeat" autocomplete="off" />
+          <input class="text-input pin-input" id="acc-pin" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" aria-label="Enter 4-digit PIN" autocomplete="off" />
+          <input class="text-input pin-input" id="acc-pin2" type="tel" inputmode="numeric" maxlength="4" placeholder="repeat" aria-label="Repeat 4-digit PIN" autocomplete="off" />
         </div>
         <p class="faint" id="pin-hint" style="font-size:12px;margin-top:6px"></p>
 
@@ -143,8 +143,10 @@ function renderCreate(root, ctx) {
 
     setActiveAccount(acc.id)
     ctx.state.account = acc
+    saveSettings({ tutorialAccountId: acc.id, tutorialDone: false, tourSeen: [] })
     ctx.toast(`Welcome, ${acc.name}!`)
-    ctx.go('library')
+    // first-run for this profile: walk them through the tutorial once
+    ctx.go('tutorial')
   })
 }
 
@@ -158,7 +160,7 @@ async function renderLock(root, ctx) {
 
   root.innerHTML = `
     <div class="acc-screen">
-      <div class="acc-brand"><span class="mark">${icon('logo')}</span>QuizForge</div>
+      <div class="acc-brand"><span class="mark">${icon('logo')}</span>Quizard</div>
       <div style="display:flex;justify-content:center">${avatarHtml(acc.color, acc.name.charAt(0).toUpperCase())}</div>
       <h1 class="acc-title">Enter PIN for ${esc(acc.name)}</h1>
       <p class="acc-sub">This profile is protected.</p>

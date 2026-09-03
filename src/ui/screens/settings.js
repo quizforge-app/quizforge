@@ -1,7 +1,9 @@
-import { exportAll, importAll, clearAllData, storageUsage, saveSettings, loadSettings, listDocs, listAccounts, getAccount, deleteAccount, setActiveAccount, accountHasData } from '../../lib/storage.js'
-import { getApiKey, setApiKey, getModelChoice, setModelChoice, testApiKey } from '../../lib/llm/gemini.js'
+import { exportAll, importAll, clearAllData, storageUsage, saveSettings, loadSettings, listDocs, listAccounts, getAccount, deleteAccount, setActiveAccount, getActiveAccountId, accountHasData } from '../../lib/storage.js'
+import { testApiKey } from '../../lib/llm/gemini.js'
+import { maybeScheduleReminders } from '../reminders.js'
 import { icon } from '../icons.js'
-import { esc } from '../helpers.js'
+import { esc, sectionTitle, row, muted, card, btn } from '../helpers.js'
+import { confirmModal } from '../confirmModal.js'
 
 function logoutToPicker(ctx) {
   setActiveAccount(null)
@@ -28,10 +30,10 @@ export async function render(root, ctx) {
     </header>
     <div class="screen">
 
-      <div class="section-title">Account</div>
+      ${sectionTitle('Account')}
       <div class="settings-group" id="account-section"></div>
 
-      <div class="section-title">Appearance</div>
+      ${sectionTitle('Appearance')}
       <div class="settings-group">
         <div class="row" data-tooltip="App color theme — auto-saved locally">
           <div><div class="label">Theme</div><div class="sub">Follows your choice, saved locally</div></div>
@@ -44,14 +46,30 @@ export async function render(root, ctx) {
           <div><div class="label">Replay introduction</div><div class="sub">See the welcome slides shown on first launch</div></div>
           <button class="btn btn-secondary" id="replay-intro-btn">${icon('refresh')} Replay</button>
         </div>
+        <div class="row" style="border-bottom:none" data-tooltip="Replay the wizard’s guided tour of the app">
+          <div><div class="label">Replay wizard tutorial</div><div class="sub">Walk through adding, quizzing and progress again</div></div>
+          <button class="btn btn-secondary" id="replay-tour-btn">${icon('refresh')} Replay</button>
+        </div>
+        <div class="row" style="border-bottom:none" data-tooltip="Skip the welcome splash and slides — go straight to the app on launch">
+          <div><div class="label">Skip intro on launch</div><div class="sub">Open directly into the app every time</div></div>
+          <div class="switch ${s.skipIntro ? 'on' : ''}" id="sw-skipintro" data-tooltip="Toggle skip intro"></div>
+        </div>
       </div>
 
-      <div class="section-title">AI question writing</div>
-      <div class="card" style="padding:16px">
+      ${sectionTitle('Wizard voice')}
+      <div class="settings-group">
+        <div class="row" style="border-bottom:none" data-tooltip="Hear the wizard speak during the guided tour">
+          <div><div class="label">Wizard voice</div><div class="sub">Play the wizard’s spoken tips in the tutorial</div></div>
+          <div class="switch ${s.wizardVoice !== false ? 'on' : ''}" id="sw-wizardvoice" data-tooltip="Toggle wizard voice"></div>
+        </div>
+      </div>
+
+      ${sectionTitle('AI question writing')}
+      ${card(`
         <p class="muted" style="font-size:13px;line-height:1.55;margin-bottom:14px">
-          QuizForge uses Google Gemini to write natural exam-style questions.
-          Get a free API key from Google AI Studio — it is stored only on this device.
-          Without a key, quizzes are still generated using built-in rules.
+          Quizard uses Google Gemini via a built-in relay to write natural exam-style questions.
+          The relay rotates across several API keys automatically, so quizzes keep generating even when one key hits its limit.
+          Without the relay, quizzes are still generated using built-in rules.
         </p>
         <div class="row" style="border-bottom:none;margin-bottom:12px" data-tooltip="After answering, tap 'Why?' to get a Gemini explanation of the correct answer">
           <div><div class="label">Explain answers</div><div class="sub">Show a “Why?” button to explain quiz answers with Gemini</div></div>
@@ -60,28 +78,25 @@ export async function render(root, ctx) {
             <button data-e="off" style="padding:8px 14px" class="${s.aiExplain === false ? 'on' : ''}" data-tooltip="Hide explanation button">Off</button>
           </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
-          <span class="label">Model</span>
-          <div class="seg" id="model-seg" style="grid-auto-columns:auto;width:auto">
-            <button data-m="fast" style="padding:8px 14px" class="${getModelChoice() === 'fast' ? 'on' : ''}">Fast</button>
-            <button data-m="balanced" style="padding:8px 14px" class="${getModelChoice() === 'balanced' ? 'on' : ''}">Balanced</button>
-            <button data-m="quality" style="padding:8px 14px" class="${getModelChoice() === 'quality' ? 'on' : ''}">Quality</button>
-          </div>
+        <p class="muted" style="font-size:12.5px;line-height:1.5;margin:0 0 12px">
+          Model: <b>gemini-3.5-flash-lite</b> · keys are built-in and auto-rotating.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:4px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-secondary" id="test-key-btn">${icon('zap')} Test connection</button>
         </div>
-        <input type="password" id="gemini-key-input" class="text-input" style="width:100%"
-               placeholder="Paste your Gemini API key" autocomplete="off"
-               value="${esc(s.geminiKey || '')}" />
-        <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-primary" id="save-key-btn">${icon('check')} Save key</button>
-          <button class="btn btn-secondary" id="test-key-btn">${icon('zap')} Test</button>
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"
-             style="font-size:12.5px;color:var(--accent);text-decoration:none">Get a free key ↗</a>
+        <p class="faint" id="key-status" style="font-size:12px;margin-top:10px">AI relay ready.</p>
+      `, { style: 'padding:16px' })}
+
+      ${sectionTitle('Study reminders')}
+      <div class="settings-group">
+        <div class="row" style="border-bottom:none" data-tooltip="Get reminded to review flashcards that are due for spaced repetition">
+          <div><div class="label">Due-card reminders</div><div class="sub">${typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.() ? 'Daily local notification on this device' : 'Browser notification when due cards are waiting'}</div></div>
+          <div class="switch ${s.reminders ? 'on' : ''}" id="sw-reminders" data-tooltip="Toggle due-card reminders"></div>
         </div>
-        <p class="faint" id="key-status" style="font-size:12px;margin-top:10px"></p>
       </div>
 
-      <div class="section-title">Backup &amp; restore</div>
-      <div class="card" style="padding:16px">
+      ${sectionTitle('Backup &amp; restore')}
+      ${card(`
         ${showNudge ? `
         <div class="backup-nudge">
           <span class="bn-icon">${icon('alert')}</span>
@@ -95,75 +110,71 @@ export async function render(root, ctx) {
         </p>
         <button class="btn btn-primary" id="export-btn" data-tooltip="Download all data as a single JSON file">${icon('download')} Export backup (.json)</button>
         <button class="btn btn-secondary" id="import-btn" style="margin-top:10px;width:100%" data-tooltip="Restore from a previously exported backup">${icon('database')} Import backup</button>
-        <input type="file" id="import-input" accept=".json,application/json" hidden />
+        <input type="file" id="import-input" accept=".json,application/json" aria-label="Import backup file" hidden />
         <p class="faint" id="usage-line" style="font-size:12px;margin-top:12px"></p>
-      </div>
+      `, { style: 'padding:16px' })}
 
-      <div class="section-title">Danger zone</div>
-      <div class="card" style="border-color:var(--bad-border)">
+      ${sectionTitle('Danger zone')}
+      ${card(`
         <button class="btn btn-danger-ghost" id="clear-btn" style="width:100%" data-tooltip="Permanently delete all documents, quizzes, history and mistakes — cannot be undone">${icon('trash')} Erase all data</button>
         <p class="faint" style="font-size:11.5px;margin-top:10px;text-align:center">Documents, quizzes, history and mistakes — permanently.</p>
-      </div>
+      `, { style: 'border-color:var(--bad-border)' })}
 
-      <div class="section-title">About</div>
-      <div class="card" style="display:flex;gap:12px;align-items:center">
-        <span class="mark" style="width:38px;height:38px;border-radius:11px;background:var(--text);display:grid;place-items:center;color:var(--bg)">${icon('logo')}</span>
-        <div>
-          <div class="label">QuizForge v1.1</div>
-          <div class="sub">Your documents never leave this device · AI polish via Google Gemini (optional)</div>
+      ${sectionTitle('About')}
+      ${card(`
+        <div style="display:flex;gap:12px;align-items:center">
+          <span class="mark" style="width:38px;height:38px;border-radius:11px;background:var(--text);display:grid;place-items:center;color:var(--bg)">${icon('logo')}</span>
+          <div>
+            <div class="label">Quizard v${typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1'}</div>
+            <div class="sub">Your documents never leave this device · AI polish via Google Gemini (optional)</div>
+          </div>
         </div>
-      </div>
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-secondary" id="clear-cache-btn" style="flex:1;min-width:140px" data-tooltip="Delete all cached files and reload — useful if something is broken">${icon('trash')} Clear cache &amp; reload</button>
+        </div>
+      `)}
     </div>
   `
 
   root.querySelector('#back-btn').addEventListener('click', () => ctx.go('library'))
 
-  const keyInput = root.querySelector('#gemini-key-input')
   function renderKeyStatus() {
-    const has = !!(loadSettings().geminiKey || '').trim()
-    root.querySelector('#key-status').textContent = has
-      ? '✓ Key saved — AI question writing is active'
-      : 'No key set — quizzes use built-in rules'
+    root.querySelector('#key-status').textContent = 'AI relay ready (gemini-3.5-flash-lite, built-in keys).'
   }
-  root.querySelector('#save-key-btn').addEventListener('click', () => {
-    setApiKey(keyInput.value)
-    keyInput.value = getApiKey()
-    renderKeyStatus()
-    ctx.toast(getApiKey() ? 'API key saved ✓' : 'API key cleared')
-  })
   const testBtn = root.querySelector('#test-key-btn')
   testBtn.addEventListener('click', async () => {
-    if (!getApiKey()) {
-      root.querySelector('#key-status').textContent = 'Paste and save a key first'
-      return
-    }
     testBtn.disabled = true
     root.querySelector('#key-status').textContent = 'Testing…'
     const res = await testApiKey()
     testBtn.disabled = false
     root.querySelector('#key-status').textContent = res.ok
-      ? `✓ Key works (${res.model})`
+      ? `✓ Relay reachable — model ${res.model}`
       : `✗ ${res.message}`
-    if (res.ok) ctx.toast('Gemini connection OK ✓')
+    if (res.ok) ctx.toast('Gemini relay OK ✓')
   })
-  root.querySelectorAll('#model-seg button').forEach(b =>
-    b.addEventListener('click', () => {
-      setModelChoice(b.dataset.m)
-      root.querySelectorAll('#model-seg button').forEach(x => x.classList.toggle('on', x === b))
-      ctx.toast(`Model set to ${b.textContent}`)
-    })
-  )
   root.querySelectorAll('#explain-seg button').forEach(b =>
     b.addEventListener('click', () => {
       saveSettings({ aiExplain: b.dataset.e !== 'off' })
       root.querySelectorAll('#explain-seg button').forEach(x => x.classList.toggle('on', x === b))
     })
   )
+  root.querySelector('#sw-reminders')?.addEventListener('click', async e => {
+    const on = e.currentTarget.classList.toggle('on')
+    saveSettings({ reminders: on })
+    if (on) {
+      const r = await maybeScheduleReminders()
+      if (!r.enabled) { ctx.toast(r.reason || 'Reminders unavailable', true); e.currentTarget.classList.remove('on'); saveSettings({ reminders: false }) }
+      else ctx.toast('Reminders on ✓')
+    } else {
+      ctx.toast('Reminders off')
+    }
+  })
+
   renderKeyStatus()
 
   async function renderAccountSection() {
     const section = root.querySelector('#account-section')
-    const acc = ctx.state.account || await getAccount(localStorage.getItem('quizforge-active-account'))
+    const acc = ctx.state.account || await getAccount(localStorage.getItem('quizard-active-account'))
     const accounts = await listAccounts()
     if (!acc) { section.innerHTML = '<div class="row"><span class="sub">No active account</span></div>'; return }
     const others = accounts.filter(a => a.id !== acc.id)
@@ -206,7 +217,7 @@ export async function render(root, ctx) {
       if (!name) return
       const target = others.find(o => o.name.toLowerCase() === name.trim().toLowerCase())
       if (!target) { ctx.toast('No profile with that name', true); return }
-      if (!confirm(`Delete "${target.name}" and ALL its documents, quizzes and mistakes?\n\nThis cannot be undone.`)) return
+      if (!await confirmModal(`Delete "${target.name}"?`, `All documents, quizzes and mistakes for <b>${esc(target.name)}</b> will be permanently removed.`)) return
       await deleteAccount(target.id)
       ctx.toast(`Removed ${target.name}`)
       renderAccountSection()
@@ -219,6 +230,40 @@ export async function render(root, ctx) {
     saveSettings({ onboarded: false })
     ctx.state.screen = 'onboarding'
     ctx.go('onboarding')
+  })
+
+  root.querySelector('#replay-tour-btn')?.addEventListener('click', async () => {
+    let aid = ctx.state.account?.id || getActiveAccountId() || localStorage.getItem('quizard-active-account')
+    if (!aid) {
+      try {
+        const accs = await listAccounts()
+        if (accs.length) {
+          aid = accs[0].id
+          setActiveAccount(aid)
+          ctx.state.account = accs[0]
+        }
+      } catch {}
+    } else if (!getActiveAccountId()) {
+      // localStorage had it but in-memory activeAccountId was cleared (e.g. after a manual clear)
+      setActiveAccount(aid)
+      if (!ctx.state.account) {
+        try { ctx.state.account = await getAccount(aid) } catch {}
+      }
+    }
+    // Reset tutorial state so it shows again
+    saveSettings({ tutorialDone: false, tourSeen: [] })
+    ctx.go('tutorial')
+  })
+
+  root.querySelector('#sw-wizardvoice')?.addEventListener('click', e => {
+    const on = e.currentTarget.classList.toggle('on')
+    saveSettings({ wizardVoice: on })
+  })
+
+  root.querySelector('#sw-skipintro')?.addEventListener('click', e => {
+    const on = e.currentTarget.classList.toggle('on')
+    saveSettings({ skipIntro: on })
+    ctx.toast(on ? 'Intro will be skipped' : 'Intro plays on launch')
   })
 
   root.querySelectorAll('#theme-seg button').forEach(b =>
@@ -236,7 +281,7 @@ export async function render(root, ctx) {
       const a = document.createElement('a')
       const d = new Date()
       a.href = url
-      a.download = `quizforge-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`
+      a.download = `quizard-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -266,8 +311,8 @@ export async function render(root, ctx) {
       importInput.value = ''
       return
     }
-    if (data?.app !== 'quizforge') {
-      ctx.toast('Not a QuizForge backup file', true)
+    if (data?.app !== 'quizard') {
+      ctx.toast('Not a Quizard backup file', true)
       importInput.value = ''
       return
     }
@@ -301,8 +346,8 @@ export async function render(root, ctx) {
       }
     }
     mask.querySelector('#imp-merge').addEventListener('click', () => run('merge'))
-    mask.querySelector('#imp-replace').addEventListener('click', () => {
-      if (confirm('Replace ALL current documents and history with the backup?\n\nThis cannot be undone.')) run('replace')
+    mask.querySelector('#imp-replace').addEventListener('click', async () => {
+      if (await confirmModal('Replace all data?', 'All current documents, quizzes and history will be replaced by the backup. <b>This cannot be undone.</b>', { confirmLabel: 'Replace' })) run('replace')
     })
   })
 
@@ -315,10 +360,18 @@ export async function render(root, ctx) {
   })
 
   root.querySelector('#clear-btn').addEventListener('click', async () => {
-    if (!confirm('Erase ALL documents, quizzes, history and mistakes?\n\nThis cannot be undone.')) return
-    if (!confirm('Are you absolutely sure? Consider exporting a backup first.')) return
+    if (!await confirmModal('Erase all data?', 'All documents, quizzes, history and mistakes will be permanently deleted. Consider exporting a backup first.')) return
     await clearAllData()
     ctx.toast('All data erased')
     ctx.go('library')
+  })
+
+  root.querySelector('#clear-cache-btn')?.addEventListener('click', async () => {
+    if (!await confirmModal('Clear cache?', 'Delete all cached files and reload the app. Your documents are stored in IndexedDB and will not be affected.')) return
+    if ('caches' in window) {
+      const names = await caches.keys()
+      await Promise.all(names.map(n => caches.delete(n)))
+    }
+    location.reload()
   })
 }

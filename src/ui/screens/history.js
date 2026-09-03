@@ -1,7 +1,7 @@
-import { listAttempts, listDocs, countMistakes, countDueCards } from '../../lib/storage.js'
+import { listAttempts, listDocs, countMistakes, countDueCards, getWeakTerms } from '../../lib/storage.js'
 import { icon } from '../icons.js'
-import { dayLabel, fmtTime, scorePill, esc } from '../helpers.js'
-import { startMistakeReview, startDueReview } from '../mistakes.js'
+import { dayLabel, fmtTime, scorePill, esc, statsRow, card, sectionTitle, row, muted } from '../helpers.js'
+import { startMistakeReview, startDueReview, startWeakReview } from '../mistakes.js'
 import { emptyProgressArt } from '../art.js'
 
 function dayKey(ts) {
@@ -57,8 +57,8 @@ function trendChart(attempts) {
 }
 
 export async function render(root, ctx) {
-  const [attempts, docs, mistakeCount, dueCount] = await Promise.all([
-    listAttempts(), listDocs(), countMistakes(), countDueCards()
+  const [attempts, docs, mistakeCount, dueCount, weakTerms] = await Promise.all([
+    listAttempts(), listDocs(), countMistakes(), countDueCards(), getWeakTerms(null)
   ])
 
   const totalQ = attempts.reduce((s, a) => s + a.total, 0)
@@ -72,14 +72,13 @@ export async function render(root, ctx) {
       <button class="icon-btn" id="theme-btn" data-tooltip="${ctx.state.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${ctx.state.theme === 'dark' ? icon('sun') : icon('moon')}</button>
     </header>
     <div class="screen">
-      <div class="stats-row">
-        <div class="stat"><div class="num">${streak}</div><div class="lbl">Day Streak</div></div>
-        <div class="stat"><div class="num">${attempts.length}</div><div class="lbl">Quizzes</div></div>
-        <div class="stat"><div class="num">${accuracy != null ? accuracy + '%' : '—'}</div><div class="lbl">Accuracy</div></div>
-      </div>
-      ${dueCount ? `
-      <div class="card" style="padding:14px 16px;margin-bottom:14px;border-color:var(--accent-border);background:var(--accent-soft)">
-        <div class="row" style="padding:2px 0 10px;border:none">
+      ${statsRow([
+        { value: streak, label: 'Day Streak' },
+        { value: attempts.length, label: 'Quizzes' },
+        { value: accuracy != null ? accuracy + '%' : '—', label: 'Accuracy' }
+      ])}
+      ${dueCount ? card(`
+        ${row(`
           <div style="display:flex;align-items:center;gap:10px">
             <span style="color:var(--accent-strong);display:flex">${icon('zap')}</span>
             <div>
@@ -87,11 +86,11 @@ export async function render(root, ctx) {
               <div class="sub">Spaced repetition — review them before you forget</div>
             </div>
           </div>
-        </div>
+        `, { borderless: true })}
         <button class="btn btn-primary" id="due-review-btn" style="padding:11px">${icon('refresh')} Start spaced review</button>
-      </div>` : ''}
-      <div class="card" style="padding:14px 16px;margin-bottom:14px">
-        <div class="row" style="padding:2px 0 10px;border:none">
+      `, { style: 'padding:14px 16px;margin-bottom:14px;border-color:var(--accent-border);background:var(--accent-soft)' }) : ''}
+      ${card(`
+        ${row(`
           <div style="display:flex;align-items:center;gap:10px">
             <span style="color:${mistakeCount ? 'var(--warn)' : 'var(--good)'};display:flex">${icon(mistakeCount ? 'alert' : 'check')}</span>
             <div>
@@ -99,27 +98,39 @@ export async function render(root, ctx) {
               <div class="sub">${mistakeCount ? 'Questions you got wrong — review them until they stick' : 'Nothing to review. Keep it up!'}</div>
             </div>
           </div>
-        </div>
+        `, { borderless: true })}
         ${mistakeCount ? `<button class="btn btn-primary" id="review-mistakes-btn" style="padding:11px" data-tooltip="Practice the questions you previously got wrong">${icon('refresh')} Review all mistakes</button>` : ''}
-      </div>
+      `, { style: 'padding:14px 16px;margin-bottom:14px' })}
+      ${weakTerms.length ? card(`
+        ${row(`
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="color:var(--bad);display:flex">${icon('target')}</span>
+            <div>
+              <div class="label">${weakTerms.length} weak term${weakTerms.length === 1 ? '' : 's'} tracked</div>
+              <div class="sub">Questions are weighted toward the terms you miss most often</div>
+            </div>
+          </div>
+        `, { borderless: true })}
+        <button class="btn btn-primary" id="weak-review-btn" style="padding:11px" data-tooltip="Review your weakest terms first">${icon('target')} Review weak spots</button>
+      `, { style: 'padding:14px 16px;margin-bottom:14px' }) : ''}
   `
 
   html += trendChart(attempts)
 
   const studied = docs.filter(d => d.attempts > 0)
   if (studied.length) {
-    html += `<div class="section-title">Document mastery</div><div class="card breakdown">`
+    let masteryRows = ''
     for (const d of studied.slice(0, 6)) {
       const pct = d.bestScore != null ? d.bestScore : 0
       const color = pct >= 80 ? 'var(--good)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)'
-      html += `
+      masteryRows += `
         <div class="bd-row">
           <span class="bd-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px">${esc(d.name)}</span>
           <div class="bd-bar"><div class="bd-fill" style="width:${pct}%;background:${color}"></div></div>
           <span class="bd-score">${d.bestScore != null ? d.bestScore + '%' : '—'}</span>
         </div>`
     }
-    html += `</div>`
+    html += sectionTitle('Document mastery') + card(masteryRows, { cls: 'breakdown' })
   }
 
   if (!attempts.length) {
@@ -133,10 +144,11 @@ export async function render(root, ctx) {
     root.innerHTML = html
     root.querySelector('#theme-btn').addEventListener('click', () => ctx.toggleTheme())
     root.querySelector('#review-mistakes-btn')?.addEventListener('click', () => startMistakeReview(ctx, null))
+    root.querySelector('#weak-review-btn')?.addEventListener('click', () => startWeakReview(ctx))
     return
   }
 
-  html += `<div class="section-title">Recent activity</div>`
+  html += sectionTitle('Recent activity')
 
   const groups = new Map()
   for (const a of attempts.slice(0, 40)) {
@@ -168,5 +180,6 @@ export async function render(root, ctx) {
   root.innerHTML = html
   root.querySelector('#theme-btn').addEventListener('click', () => ctx.toggleTheme())
   root.querySelector('#review-mistakes-btn')?.addEventListener('click', () => startMistakeReview(ctx, null))
+  root.querySelector('#weak-review-btn')?.addEventListener('click', () => startWeakReview(ctx))
   root.querySelector('#due-review-btn')?.addEventListener('click', () => startDueReview(ctx))
 }
