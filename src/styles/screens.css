@@ -620,6 +620,129 @@ html[data-theme='dark'] .rvw-term dt { color: var(--accent); }
 mark.find-hit { background: rgba(251, 191, 36, 0.35); color: inherit; padding: 0 1px; border-radius: 3px; }
 mark.find-current { background: var(--gold); color: #1c1400; box-shadow: 0 0 10px rgba(251, 191, 36, 0.6); }
 
+/* ── Exam prep ── */
+.exam-card-lib {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; margin-bottom: 18px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.16), rgba(6, 182, 212, 0.10));
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  cursor: pointer; text-align: left;
+  transition: transform .18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .2s ease;
+  box-shadow: 0 6px 20px -6px var(--accent-glow);
+}
+.exam-card-lib:hover { transform: translateY(-1px); box-shadow: 0 10px 28px -6px var(--accent-glow); }
+.exam-card-lib:active { transform: scale(0.985); }
+.exam-card-lib .exam-ico {
+  width: 40px; height: 40px; border-radius: var(--radius-sm); flex: 0 0 auto;
+  background: var(--grad-accent); color: #fff;
+  display: grid; place-items: center;
+  box-shadow: var(--grad-shadow);
+}
+.exam-card-lib .exam-ico svg { width: 18px; height: 18px; }
+.exam-card-lib .exam-card-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.exam-card-lib .exam-card-title { font-size: 14px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exam-card-lib .exam-card-sub { font-size: 11.5px; color: var(--text-dim); }
+.exam-card-lib .exam-card-cta {
+  font-size: 12px; font-weight: 800; color: var(--accent);
+  border: 1px solid var(--accent-border); border-radius: var(--radius-pill);
+  padding: 6px 12px; white-space: nowrap;
+}
+html[data-theme='dark'] .exam-card-lib .exam-card-cta { color: var(--accent); }
+
+/* always-visible exam prep entry in the library tools row */
+.exam-entry {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; margin-top: 10px;
+  padding: 11px 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text); font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.exam-entry:hover { background: var(--surface-hover); border-color: var(--accent-border); }
+.exam-entry:active { transform: scale(0.99); }
+.exam-entry .exam-ico {
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--grad-accent); color: #fff;
+  display: grid; place-items: center; flex: 0 0 auto;
+}
+.exam-entry .exam-ico svg { width: 14px; height: 14px; }
+.exam-entry span:last-of-type { flex: 1; text-align: left; }
+.exam-entry svg:last-child { width: 15px; height: 15px; color: var(--text-faint); }
+
+.exam-countdown {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--accent); background: var(--accent-soft);
+  border-radius: var(--radius-pill); padding: 2px 8px;
+}
+.exam-countdown.urgent { color: #fff; background: var(--bad); }
+.exam-card .exam-ico.urgent { box-shadow: 0 0 14px var(--bad-border); }
+.exam-past { opacity: 0.55; }
+.exam-banner {
+  text-align: center; font-weight: 800; font-size: 14px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px;
+}
+.exam-banner.urgent { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-border); }
+.ec-topic { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.ec-topic:last-child { border-bottom: none; }
+.ec-topic-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.ec-topic-reason { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+
+/* ── Exam wizard chat ── */
+.ec-screen { display: flex; flex-direction: column; min-height: calc(100dvh - var(--header-h) - 20px); }
+.ec-coverage {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 12px;
+}
+.ec-cov-head { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 8px; }
+.ec-cov-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 4px 0; }
+.ec-cov-row.ok { color: var(--text); }
+.ec-cov-row.missing { color: var(--warn); }
+.ec-cov-ico { font-weight: 900; }
+.ec-cov-row.ok .ec-cov-ico { color: var(--good); }
+.ec-cov-row.missing .ec-cov-ico { color: var(--warn); }
+.ec-cov-missing { font-size: 11.5px; color: var(--warn); margin-top: 8px; }
+
+.ec-log { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 6px 0 14px; overflow-y: auto; }
+.ec-msg { display: flex; gap: 8px; align-items: flex-end; animation: riseIn .3s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.ec-msg.ec-user { justify-content: flex-end; }
+.ec-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; border: 1px solid var(--accent-border); }
+.ec-bubble {
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px; line-height: 1.55;
+  white-space: pre-wrap;
+}
+.ec-wiz .ec-bubble { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+.ec-user .ec-bubble { background: var(--grad-accent); color: #fff; border-bottom-right-radius: 4px; }
+.ec-typing { display: flex; gap: 4px; padding: 14px 16px; }
+.ec-typing span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-faint);
+  animation: ecBlink 1.2s ease-in-out infinite;
+}
+.ec-typing span:nth-child(2) { animation-delay: 0.2s; }
+.ec-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ecBlink {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+.ec-input-row { display: flex; gap: 8px; align-items: center; padding: 10px 0; }
+.ec-input-row .text-input { flex: 1; padding: 12px 16px; }
+.ec-attach, .ec-send { width: 46px; height: 46px; flex: 0 0 auto; }
+.ec-send { background: var(--grad-accent); color: #fff; border: none; border-radius: var(--radius-sm); box-shadow: var(--grad-shadow); }
+.ec-create { margin: 0 0 16px; }
+
+.ec-empty-wiz { width: 120px; margin: 0 auto 12px; }
+.ec-empty-wiz img { width: 100%; border-radius: 50%; border: 1px solid var(--border); }
+
 .tldr-line {
   display: flex; gap: 12px; align-items: flex-start;
   font-size: 14px; line-height: 1.6; color: var(--text-dim);

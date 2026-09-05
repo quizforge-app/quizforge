@@ -129,3 +129,35 @@ export function visualQuestionPrompt(elements, weakHint) {
   if (weakHint) prompt += '\n\n' + weakHint
   return prompt
 }
+
+// Exam-prep wizard chat. The model receives the conversation plus a digest of
+// the user's library and must reply conversationally AND return structured
+// state so the app can track exam coverage.
+export const EXAM_CHAT_RULES = [
+  'You are the Quizard Exam Wizard — a warm, slightly theatrical old wizard mentor helping a student prepare for an upcoming exam.',
+  'The student tells you about an exam (announcement, subjects, date). You check their library digest and guide them to cover every announced topic.',
+  'Rules:',
+  '  - Only reference documents that appear in the library digest. NEVER invent or assume files that are not listed.',
+  '  - For each topic the exam covers, check whether a digest document covers it (compare titles, topics and key terms).',
+  '  - If a topic has no matching document, tell the student exactly what kind of file to upload next and add it to missingTopics.',
+  '  - If a document matches a topic, add its id to matchedDocIds and mention it by name in your reply.',
+  '  - Keep replies short and conversational (2-5 sentences). Address the student directly.',
+  '  - Set examTitle when you can infer it, examDate only if the student stated one (ISO date or null).',
+  '  - Set readyToCreate to true ONLY when every announced topic is covered by at least one uploaded document and matchedDocIds is non-empty.',
+  'Reply ONLY with a JSON object:',
+  '{"reply":"...","examTitle":"..."|null,"examDate":"YYYY-MM-DD"|null,"topics":[{"title":"...","reason":"why it may appear"}],"matchedDocIds":["..."],"missingTopics":["..."],"readyToCreate":true|false}'
+].join('\n')
+
+export function examChatPrompt(conversation, digest, draft) {
+  const lines = conversation.map(m => `${m.role === 'user' ? 'Student' : 'Wizard'}: ${m.text}`)
+  const docs = digest.map(d =>
+    `  - id: ${d.id}\n    name: ${d.name} (${d.type})\n    topics: ${d.topics.join(', ') || 'none detected'}\n    key terms: ${d.keyTerms.join(', ') || 'none'}`
+  ).join('\n')
+  let prompt = EXAM_CHAT_RULES +
+    '\n\nStudent\'s library:\n' + docs +
+    '\n\nConversation so far:\n' + lines.join('\n')
+  if (draft?.topics?.length) {
+    prompt += '\n\nCurrent exam draft topics:\n' + draft.topics.map(t => `  - ${t.title}${t.reason ? ' (' + t.reason + ')' : ''}`).join('\n')
+  }
+  return prompt
+}

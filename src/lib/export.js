@@ -1,4 +1,5 @@
 import { summarizeDoc } from './summarize.js'
+import { rankExamTopics } from './exam.js'
 
 function download(filename, content, mime = 'text/markdown') {
   const blob = new Blob([content], { type: mime })
@@ -190,6 +191,71 @@ export async function exportPdfHandout(doc, extras = {}) {
   text(`Generated ${stamp()} · exported from Quizard`, { size: 9, color: '#868ea8' })
 
   pdf.save(`quizard-reviewer-${slug(doc.name)}.pdf`)
+  return true
+}
+
+/* Exam prep handout: ranked topics with reasons + per-file section notes. */
+export async function exportExamPdf(exam, docs) {
+  const { jsPDF } = await import('jspdf')
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+  const W = 595.28, H = 841.89, M = 56
+  let y = 0
+
+  const page = () => { pdf.addPage(); y = M }
+  const need = h => { if (y + h > H - M) page() }
+  const text = (str, { size = 11, bold = false, color = '#1c2438', gap = 6, indent = 0 } = {}) => {
+    pdf.setFont('helvetica', bold ? 'bold' : 'normal')
+    pdf.setFontSize(size)
+    pdf.setTextColor(color)
+    const lines = pdf.splitTextToSize(str, W - M * 2 - indent)
+    need(lines.length * (size + 3))
+    lines.forEach(line => { pdf.text(line, M + indent, y + size); y += size + 3 })
+    y += gap
+  }
+  const rule = () => { need(14); pdf.setDrawColor('#d9d2f2'); pdf.line(M, y + 6, W - M, y + 6); y += 14 }
+
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor('#7c3aed')
+  pdf.text('E X A M   P R E P', M, M + 8)
+  y = M + 26
+  text(exam.title, { size: 20, bold: true, gap: 2 })
+  const when = exam.examDate
+    ? new Date(exam.examDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    : null
+  text(`${when ? when + ' · ' : ''}${docs.length} file${docs.length === 1 ? '' : 's'} · prepared ${stamp()}`, { size: 9, color: '#868ea8', gap: 10 })
+  rule()
+
+  if (exam.announcement) {
+    text('The announcement', { size: 13, bold: true, color: '#5b3df5' })
+    text(exam.announcement, { size: 10.5, color: '#475069' })
+  }
+
+  const ranked = rankExamTopics(exam, docs)
+  if (ranked.length) {
+    rule()
+    text('Topics to review — ranked by likelihood', { size: 13, bold: true, color: '#5b3df5' })
+    ranked.forEach((t, i) => {
+      need(26)
+      text(`${i + 1}. ${t.title}`, { size: 11, bold: true, gap: 1 })
+      text(`${t.docName}${t.reason ? ' · ' + t.reason : ''}`, { size: 9.5, color: '#868ea8', indent: 12, gap: 4 })
+    })
+  }
+
+  for (const doc of docs) {
+    rule()
+    text(doc.name, { size: 13, bold: true, color: '#5b3df5' })
+    const summary = summarizeDoc(doc.text || '')
+    if (summary.tldr.length) summary.tldr.forEach(p => text('•  ' + p, { size: 10.5, color: '#475069', gap: 2 }))
+    summary.sections.forEach((sec, i) => {
+      need(30)
+      text(`${i + 1}. ${sec.title}`, { size: 11, bold: true, gap: 2 })
+      sec.points.forEach(p => text('–  ' + p, { size: 10, color: '#475069', indent: 10, gap: 1 }))
+    })
+  }
+
+  rule()
+  text(`Generated ${stamp()} · exported from Quizard`, { size: 9, color: '#868ea8' })
+
+  pdf.save(`quizard-exam-${slug(exam.title)}.pdf`)
   return true
 }
 

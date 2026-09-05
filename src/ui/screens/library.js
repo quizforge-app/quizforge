@@ -1,4 +1,5 @@
-import { listDocs, deleteDoc, loadSettings, saveSettings, deriveFolders, deriveTags, listDecks, deleteDeck } from '../../lib/storage.js'
+import { listDocs, deleteDoc, loadSettings, saveSettings, deriveFolders, deriveTags, listDecks, deleteDeck, listExams } from '../../lib/storage.js'
+import { countdownLabel } from '../../lib/exam.js'
 import { icon } from '../icons.js'
 import { typeLabel, scorePill, fmtDate, esc, statsRow, sectionTitle, btn } from '../helpers.js'
 import { emptyLibraryArt } from '../art.js'
@@ -14,6 +15,8 @@ export async function render(root, ctx) {
   const docs = await listDocs()
   ctx.state.docs = docs
   const decks = await listDecks().catch(() => [])
+  const exams = await listExams().catch(() => [])
+  const nextExam = exams.find(e => (e.status || 'upcoming') === 'upcoming')
 
   const settings = loadSettings()
   let query = ''
@@ -46,6 +49,15 @@ export async function render(root, ctx) {
       </div>
     </header>
     <div class="screen${docs.length ? '' : ' screen-center'}">
+      ${nextExam ? `
+      <button class="exam-card exam-card-lib" data-exam="${nextExam.id}">
+        <span class="exam-ico">${icon('fileText')}</span>
+        <span class="exam-card-main">
+          <span class="exam-card-title">${esc(nextExam.title)}</span>
+          <span class="exam-card-sub">${nextExam.docIds?.length || 0} files · ${nextExam.topics?.length || 0} topics${countdownLabel(nextExam.examDate) ? ' · ' + countdownLabel(nextExam.examDate) : ''}</span>
+        </span>
+        <span class="exam-card-cta">Start prep</span>
+      </button>` : ''}
   `
 
   if (docs.length) {
@@ -68,6 +80,11 @@ export async function render(root, ctx) {
           ${SORTS.map(s => `<button data-sort="${s.id}" class="${sort === s.id ? 'on' : ''}" data-tooltip="Sort by ${s.label.toLowerCase()}">${s.label}</button>`).join('')}
         </div>
       </div>
+      <button class="exam-entry" id="exams-open-btn" data-tooltip="Prepare for an upcoming exam">
+        <span class="exam-ico">${icon('fileText')}</span>
+        <span>Exam prep</span>
+        ${icon('chevronRight')}
+      </button>
       ${(folders.length || tags.length) ? `
       <div class="lib-filters">
         ${folders.length ? `
@@ -124,6 +141,10 @@ export async function render(root, ctx) {
         <h3>No documents yet</h3>
         <p>Add a PDF, Word, PowerPoint or plain text file and turn it into instant practice quizzes — right on your device.</p>
         <button class="btn btn-primary" id="empty-import" style="max-width:230px;margin:0 auto">${icon('plus')} Add Document</button>
+        <button class="btn exam-entry" id="exams-open-btn" style="max-width:230px;margin:10px auto 0">
+          <span class="exam-ico">${icon('fileText')}</span>
+          <span>Exam prep</span>
+        </button>
       </div>`
   }
 
@@ -240,6 +261,10 @@ export async function render(root, ctx) {
       }
     })
   }
+
+  const examCardEl = root.querySelector('.exam-card')
+  examCardEl?.addEventListener('click', () => ctx.go('exams', examCardEl.dataset.exam))
+  root.querySelector('#exams-open-btn')?.addEventListener('click', () => ctx.go('exams'))
 
   const searchEl = root.querySelector('#lib-search')
   if (searchEl) {

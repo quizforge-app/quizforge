@@ -112,9 +112,23 @@ export interface QuizConfig {
   fixedSeed: number | null
 }
 
+export interface Exam {
+  id: string
+  accountId?: string
+  title: string
+  examDate?: number
+  createdAt: number
+  announcement: string
+  docIds: string[]
+  topics: { title: string; docId?: string; reason?: string }[]
+  status?: 'upcoming' | 'done'
+  [key: string]: unknown
+}
+
 export interface AppSettings {
   theme?: string
   tutorialDone?: boolean
+  tutorialDoneAccounts?: Record<string, boolean>
   tutorialAccountId?: string
   tourSeen?: string[]
   wizardVoice?: boolean

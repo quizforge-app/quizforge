@@ -98,7 +98,21 @@ export async function render(root, ctx) {
     }
   }
 
-  if (!st && ctx.state.sharedQuiz) {
+  if (!st && ctx.state.examSession) {
+    const examSession = ctx.state.examSession
+    ctx.state.examSession = null
+    session = examSession.questions
+    cfg = { timerSec: 0, count: session.length }
+    st = {
+      questions: session,
+      index: 0,
+      correct: 0,
+      answers: [],
+      examMode: true,
+      examId: examSession.examId,
+      docName: examSession.docName || 'Exam Prep'
+    }
+  } else if (!st && ctx.state.sharedQuiz) {
     const shared = ctx.state.sharedQuiz
     session = shared.questions
     cfg = { timerSec: shared.cfg?.timerSec || 0, count: session.length }
@@ -631,10 +645,11 @@ export async function render(root, ctx) {
       if (a.userOk) byType[a.type].c++
     }
 
-    if (!st.mistakeMode && doc) {
+    if ((!st.mistakeMode && doc) || st.examMode) {
       await ctx.saveAttemptRecord({
-        docId: doc.id,
-        docName: doc.name,
+        docId: doc?.id || null,
+        docName: st.docName || doc?.name || 'Exam Prep',
+        examId: st.examId || undefined,
         correct: st.correct,
         total: total(),
         percent,
@@ -653,6 +668,7 @@ export async function render(root, ctx) {
       wrongCount,
       mistakeMode: !!st.mistakeMode,
       shared: !!st.shared,
+      examMode: !!st.examMode,
       challenge: st.challenge || null,
       cfg: { timerSec: cfg?.timerSec || 0 },
       byType,

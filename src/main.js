@@ -45,7 +45,9 @@ const SCREEN_IMPORTS = {
   welcome: () => import('./ui/screens/welcome.js'),
   flashcards: () => import('./ui/screens/flashcards.js'),
   shared: () => import('./ui/screens/shared.js'),
-  tutorial: () => import('./ui/screens/tutorial.js')
+  tutorial: () => import('./ui/screens/tutorial.js'),
+  exams: () => import('./ui/screens/exams.js'),
+  'exam-chat': () => import('./ui/screens/exam-chat.js')
 }
 
 // Cache loaded modules so dynamic import() only fires once per screen.
@@ -180,7 +182,8 @@ const ctx = {
   },
   go(screen, params) {
     if (screen === 'setup' || screen === 'docdetail' || screen === 'reviewer' || screen === 'flashcards') state.currentDocId = params
-    if (screen === 'quiz' && !state.currentDocId && !state.mistakeReview && !state.resumeRequested && !state.sharedQuiz) screen = 'library'
+    if (screen === 'exams') state.examDetailId = params || null
+    if (screen === 'quiz' && !state.currentDocId && !state.mistakeReview && !state.resumeRequested && !state.sharedQuiz && !state.examSession) screen = 'library'
     if (screen === 'library' || (screen === 'quiz' && state.currentDocId)) { state.sharedQuiz = null; state.challenge = null }
     state.screen = screen
     renderScreen(screen)

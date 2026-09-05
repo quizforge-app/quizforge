@@ -11,11 +11,17 @@ import { nextState, GRADES } from './srs.js'
 /** @typedef {import('./db-types.js').DocImage} DocImage */
 /** @typedef {import('./db-types.js').WeakTerm} WeakTerm */
 
-const dbPromise = openDB('quizard', 8, {
+const dbPromise = openDB('quizard', 9, {
   upgrade(db, oldVersion, _newVersion, transaction) {
     if (oldVersion < 8) {
       // docs gain optional `original` (source file blob) and `visualAnalysis`
       // (cached Gemini document analysis) fields — no structural change needed.
+    }
+    if (oldVersion < 9) {
+      // exams: exam-prep sessions created through the wizard chat
+      const exams = db.createObjectStore('exams', { keyPath: 'id' })
+      exams.createIndex('accountId', 'accountId')
+      exams.createIndex('status', 'status')
     }
     if (oldVersion < 1) {
       const docs = db.createObjectStore('docs', { keyPath: 'id' })
@@ -517,6 +523,44 @@ export async function listDecks() {
 export async function deleteDeck(id) {
   const db = await dbPromise
   await db.delete('decks', id)
+}
+
+// ── Exams (exam-prep sessions from the wizard chat) ──
+
+/** @param {import('./db-types.js').Exam} exam @returns {Promise<import('./db-types.js').Exam>} */
+export async function saveExam(exam) {
+  const db = await dbPromise
+  const accountId = await requireAccount()
+  const rec = { ...exam, accountId }
+  await db.put('exams', rec)
+  return rec
+}
+
+export async function getExam(id) {
+  const db = await dbPromise
+  const rec = await db.get('exams', id)
+  const accountId = await getActiveAccountId()
+  return rec && rec.accountId === accountId ? rec : null
+}
+
+/** @returns {Promise<Array<import('./db-types.js').Exam>>} upcoming first, then by createdAt desc */
+export async function listExams() {
+  const db = await dbPromise
+  const accountId = await getActiveAccountId()
+  const now = Date.now()
+  return (await db.getAllFromIndex('exams', 'accountId', accountId))
+    .filter(e => (e.status || 'upcoming') === 'upcoming' || now - (e.examDate || 0) < 7 * 86400000)
+    .sort((a, b) => {
+      const au = (a.status || 'upcoming') === 'upcoming'
+      const bu = (b.status || 'upcoming') === 'upcoming'
+      if (au !== bu) return au ? -1 : 1
+      return (b.createdAt || 0) - (a.createdAt || 0)
+    })
+}
+
+export async function deleteExam(id) {
+  const db = await dbPromise
+  await db.delete('exams', id)
 }
 
 export function srsIdFor(docId, term, sentence) {
