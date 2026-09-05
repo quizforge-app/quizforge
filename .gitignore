@@ -28,3 +28,4 @@ wizard-theme-onboarding.png
 tmp/
 *.mp3.sample
 android/keystore.properties
+.zcode/
