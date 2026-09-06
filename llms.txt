@@ -14,4 +14,4 @@ Quizard is an offline-first study PWA: import a document and it extracts the tex
 
 - Static Vite PWA (vanilla JS modules, no framework). Data in IndexedDB; settings in localStorage.
 - AI features call a [Netlify Function relay](https://quizard-67e6a203.netlify.app/.netlify/functions/gemini) — no user keys needed.
-- Source repository: [github.com/quizard-app/quizard](https://github.com/quizard-app/quizard)
+- Source repository: [github.com/quizforge-app/quizard](https://github.com/quizforge-app/quizard)
