@@ -1,39 +1,40 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#090D16" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0820" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <meta name="description" content="QuizForge turns your PDF, PPTX and DOCX documents into quizzes. Study offline, organize by folder and tag, and share quizzes with friends — no account needed to play." />
-  <link rel="canonical" href="https://quizforge-app.github.io/quizforge/" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <meta name="description" content="Quizard turns your PDF, PPTX and DOCX documents into quizzes. Study offline, organize by folder and tag, and share quizzes with friends — no account needed to play." />
+  <link rel="canonical" href="https://quizforge-app.github.io/quizard/" />
   <meta name="robots" content="index,follow" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="QuizForge — Study from your documents" />
+  <meta property="og:title" content="Quizard — Study from your documents" />
   <meta property="og:description" content="Turn your PDF, PPTX and DOCX documents into quizzes. Offline, private, and shareable." />
-  <meta property="og:url" content="https://quizforge-app.github.io/quizforge/" />
+  <meta property="og:url" content="https://quizforge-app.github.io/quizard/" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="google-site-verification" content="google85c8e32bf2f83692" />
-  <title>QuizForge — Study from your documents</title>
-  <link rel="icon" href="/quizforge/icons/icon-192.png" />
+  <title>Quizard — Study from your documents</title>
+  <link rel="icon" href="/quizard/icons/icon-192.png" />
   <style>
-    #boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#090D16;color:#F8FAFC;font-family:'Inter',system-ui,-apple-system,sans-serif;z-index:9999}
-    #boot .mark{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#4F46E5 0%,#06B6D4 100%);display:grid;place-items:center;color:#fff;box-shadow:0 10px 28px rgba(79,70,229,.45)}
+    #boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0B0820;color:#ECE9FF;font-family:'Inter',system-ui,-apple-system,sans-serif;z-index:9999;background-image:radial-gradient(1.5px 1.5px at 18% 22%,rgba(255,255,255,.7),transparent 60%),radial-gradient(1px 1px at 62% 38%,rgba(255,255,255,.5),transparent 60%),radial-gradient(1.5px 1.5px at 78% 72%,rgba(255,255,255,.6),transparent 60%),radial-gradient(1px 1px at 35% 82%,rgba(255,255,255,.5),transparent 60%);}
+    #boot .mark{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#8B5CF6 0%,#22D3EE 100%);display:grid;place-items:center;color:#fff;box-shadow:0 10px 28px rgba(139,92,246,.5)}
     #boot .mark svg{width:26px;height:26px}
-    #boot .label{font-family:'Instrument Serif',serif;font-size:26px;letter-spacing:-0.02em}
-    #boot .sub{font-size:13px;color:#94A3B8;letter-spacing:0.02em}
+    #boot .label{font-family:'Cinzel',serif;font-size:26px;letter-spacing:0.02em}
+    #boot .sub{font-size:13px;color:#B9AFDF;letter-spacing:0.02em}
   </style>
-  <script type="module" crossorigin src="/quizforge/assets/index-ClNyTWHE.js"></script>
-  <link rel="stylesheet" crossorigin href="/quizforge/assets/index-CMQRkAgc.css">
-<link rel="manifest" href="/quizforge/manifest.webmanifest"></head>
+  <script type="module" crossorigin src="/quizard/assets/index-CybBJgOJ.js"></script>
+  <link rel="modulepreload" crossorigin href="/quizard/assets/topics-2sMjMAqj.js">
+  <link rel="stylesheet" crossorigin href="/quizard/assets/index-D_wIOZq8.css">
+<link rel="manifest" href="/quizard/manifest.webmanifest"></head>
 <body>
   <div id="boot">
     <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.75a5.25 5.25 0 0 1 5.25 5.25v3a1.5 1.5 0 0 1-1.5 1.5h-7.5a1.5 1.5 0 0 1-1.5-1.5v-3A5.25 5.25 0 0 1 12 6.75Z"/><path d="M9 12h6"/><path d="M9 15h6"/><path d="M6.75 12H6a1.5 1.5 0 0 0-1.5 1.5v1.5A2.25 2.25 0 0 0 6.75 17.25H18A2.25 2.25 0 0 0 20.25 15V13.5A1.5 1.5 0 0 0 18.75 12H18"/></svg></div>
-    <div class="label">QuizForge</div>
+    <div class="label">Quizard</div>
     <div class="sub">Study from your documents — offline</div>
   </div>
-  <div id="app"></div>
+  <div id="app" role="main"></div>
 </body>
 </html>

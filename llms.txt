@@ -1,0 +1,17 @@
+# Quizard
+
+> Turn your PDF, PPTX, DOCX or text documents into practice quizzes. 100% offline and private — files and scores never leave the device.
+
+## Product
+
+Quizard is an offline-first study PWA: import a document and it extracts the text locally and generates multiple-choice, true/false, fill-in-the-blank, identification, matching, ordering and short-answer quizzes.
+
+- [App homepage](https://quizard-67e6a203.netlify.app/)
+- [PWA manifest](https://quizard-67e6a203.netlify.app/manifest.webmanifest)
+- [Service worker](https://quizard-67e6a203.netlify.app/sw.js)
+
+## Tech notes
+
+- Static Vite PWA (vanilla JS modules, no framework). Data in IndexedDB; settings in localStorage.
+- AI features call a [Netlify Function relay](https://quizard-67e6a203.netlify.app/.netlify/functions/gemini) — no user keys needed.
+- Source repository: [github.com/quizard-app/quizard](https://github.com/quizard-app/quizard)
