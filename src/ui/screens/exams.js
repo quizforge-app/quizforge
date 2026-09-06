@@ -3,6 +3,7 @@
 
 import { getExam, listExams, deleteExam, getDoc, listDueCards, getWeakTerms } from '../../lib/storage.js'
 import { buildExamQuiz, countdownLabel, rankExamTopics } from '../../lib/exam.js'
+import { assetUrl } from '../../lib/assets.js'
 import { exportExamPdf } from '../../lib/export.js'
 import { icon } from '../icons.js'
 import { esc, sectionTitle } from '../helpers.js'
@@ -37,7 +38,7 @@ async function renderList(root, ctx) {
       ${past.length ? sectionTitle('Past') + past.map(e => examCard(e, true)).join('') : ''}
       ${!exams.length ? `
         <div class="empty-state">
-          <div class="ec-empty-wiz"><img src="/wizard/wizard-thinking.jpg" alt="" /></div>
+          <div class="ec-empty-wiz"><img src="${assetUrl('wizard/wizard-thinking.jpg')}" alt="" /></div>
           <h3>No exams yet</h3>
           <p>Tell the wizard about your next exam — paste the announcement, upload the files it asks for, and practice across all of them.</p>
         </div>` : ''}

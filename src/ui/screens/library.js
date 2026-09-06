@@ -1,5 +1,6 @@
 import { listDocs, deleteDoc, loadSettings, saveSettings, deriveFolders, deriveTags, listDecks, deleteDeck, listExams } from '../../lib/storage.js'
 import { countdownLabel } from '../../lib/exam.js'
+import { assetUrl } from '../../lib/assets.js'
 import { icon } from '../icons.js'
 import { typeLabel, scorePill, fmtDate, esc, statsRow, sectionTitle, btn } from '../helpers.js'
 import { emptyLibraryArt } from '../art.js'
@@ -63,7 +64,7 @@ export async function render(root, ctx) {
   if (docs.length) {
     html += `
       <div class="hero lib-hero">
-        <img class="lib-wiz" src="/wizard/wizard-studying.jpg" alt="" />
+        <img class="lib-wiz" src="${assetUrl('wizard/wizard-studying.jpg')}" alt="" />
         <div>
           <h1>Your library</h1>
           <p>${subtitle}</p>

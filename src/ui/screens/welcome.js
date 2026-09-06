@@ -1,4 +1,5 @@
 import { icon } from '../icons.js'
+import { assetUrl } from '../../lib/assets.js'
 
 const SPARKS = Array.from({ length: 10 }, (_, i) =>
   `<i style="--a:${i * 36}deg;--d:${(0.45 + i * 0.045).toFixed(2)}s"></i>`
@@ -21,7 +22,7 @@ export function render(root, ctx) {
           <span class="wm-rune"></span>
           <span class="wm-rune r2"></span>
           <span class="wm-circle"></span>
-          <span class="wm-icon"><img class="wiz-hero" src="/wizard/wizard-welcome.jpg" alt="Quizard wizard"></span>
+          <span class="wm-icon"><img class="wiz-hero" src="${assetUrl('wizard/wizard-welcome.jpg')}" alt="Quizard wizard"></span>
           <span class="wm-sparks" aria-hidden="true">${SPARKS}</span>
         </div>
         <h1 class="welcome-title">

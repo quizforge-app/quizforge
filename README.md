@@ -62,7 +62,7 @@ JAVA_HOME="<jdk-17+" ./gradlew assembleRelease
 ## Deployment
 
 - **Netlify**: `netlify.toml` builds `vite build` → `dist`, functions from `netlify/functions/`. Or `npx netlify deploy --prod --dir dist`.
-- **GitHub Pages**: `VITE_BASE=/quizforge/ npm run build`, push `dist/` to the `gh-pages` branch.
+- **GitHub Pages**: `VITE_BASE=/quizard/ npm run build`, push `dist/` to the `gh-pages` branch (repo: quizforge-app/quizard).
 
 ## Project layout
 

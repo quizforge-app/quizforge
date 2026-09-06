@@ -2,6 +2,7 @@ import { getDoc, bankMistake, resolveMistake, srsIdFor, getSrsItem, upsertSrsFro
 import { generateQuiz, TYPE_META } from '../../lib/quizgen.js'
 import { generateQuizAI, gradeShortAnswer } from '../../lib/llm/quiz-ai.js'
 import { explainAnswer } from '../../lib/llm/explain.js'
+import { assetUrl } from '../../lib/assets.js'
 import { hasApiKey } from '../../lib/llm/gemini.js'
 import { checkTyped } from '../../lib/textproc.js'
 import { icon } from '../icons.js'
@@ -278,7 +279,7 @@ export async function render(root, ctx) {
         ${cfg?.timerSec > 0 ? '<span class="timer-chip" id="timer-chip" data-tooltip="Time remaining">' + icon('timer') + '<span id="timer-val"></span></span>' : ''}
       </div>
       <div class="quiz-body">
-        <img class="q-wiz" src="/wizard/wizard-thinking.jpg" alt="" />
+        <img class="q-wiz" src="${assetUrl('wizard/wizard-thinking.jpg')}" alt="" />
         ${imageHtml}
         <div class="q-type-badge"><span class="chip on">${TYPE_META[q.type].short}</span></div>
         ${stemHtml}
@@ -359,7 +360,7 @@ export async function render(root, ctx) {
       ;(st.index < total() - 1 ? advance : finish)()
     }
     zone.innerHTML = `
-      <img class="q-wiz-fb" src="/wizard/${ok ? 'wizard-celebrating' : 'wizard-encouraging'}.jpg" alt="" />
+      <img class="q-wiz-fb" src="${assetUrl(`wizard/${ok ? 'wizard-celebrating' : 'wizard-encouraging'}.jpg`)}" alt="" />
       <div class="feedback-banner ${ok ? 'good' : 'bad'}">
         ${ok ? icon('check') : icon('x')}
         <div>

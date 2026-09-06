@@ -3,6 +3,7 @@
 // topic is covered, then the exam is created from all matched files.
 
 import { getDoc, listDocs, saveDoc, saveExam } from '../../lib/storage.js'
+import { assetUrl } from '../../lib/assets.js'
 import { extractText } from '../../lib/extract/index.js'
 import { detectTopics } from '../../lib/topics.js'
 import { buildDigest, examChat } from '../../lib/llm/exam-ai.js'
@@ -56,7 +57,7 @@ export async function render(root, ctx) {
     row.className = 'ec-msg ' + (role === 'user' ? 'ec-user' : 'ec-wiz')
     row.innerHTML = role === 'user'
       ? `<div class="ec-bubble">${esc(text)}</div>`
-      : `<img class="ec-avatar" src="/wizard/wizard-thinking.jpg" alt="" /><div class="ec-bubble">${esc(text)}</div>`
+      : `<img class="ec-avatar" src="${assetUrl('wizard/wizard-thinking.jpg')}" alt="" /><div class="ec-bubble">${esc(text)}</div>`
     log.appendChild(row)
     log.scrollTop = log.scrollHeight
     return row
@@ -65,7 +66,7 @@ export async function render(root, ctx) {
   function typing() {
     const row = document.createElement('div')
     row.className = 'ec-msg ec-wiz'
-    row.innerHTML = `<img class="ec-avatar" src="/wizard/wizard-thinking.jpg" alt="" />
+    row.innerHTML = `<img class="ec-avatar" src="${assetUrl('wizard/wizard-thinking.jpg')}" alt="" />
       <div class="ec-bubble ec-typing"><span></span><span></span><span></span></div>`
     log.appendChild(row)
     log.scrollTop = log.scrollHeight

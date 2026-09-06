@@ -1,5 +1,6 @@
 import { saveSettings, listAccounts } from '../../lib/storage.js'
 import { onboardingArt } from '../art.js'
+import { assetUrl } from '../../lib/assets.js'
 
 const SLIDES = [
   {
@@ -49,7 +50,7 @@ export function render(root, ctx) {
             <div class="onb-slide" data-accent="${s.accent}">
               <div class="onb-stage">
                 <div class="onb-glow"></div>
-                <div class="onb-illust">${i === 0 ? '<img class="wiz-hero" src="/wizard/wizard-image.jpg" alt="Quizard wizard">' : onboardingArt[i]}</div>
+                <div class="onb-illust">${i === 0 ? `<img class="wiz-hero" src="${assetUrl('wizard/wizard-image.jpg')}" alt="Quizard wizard">` : onboardingArt[i]}</div>
               </div>
               <div class="onb-copy">
                 <div class="onb-eyebrow">${s.eyebrow}</div>

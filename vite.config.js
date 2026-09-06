@@ -88,13 +88,17 @@ export default defineConfig(({ mode }) => {
         background_color: '#0b0d14',
         theme_color: '#0b0d14',
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+          // Relative paths so the manifest works at the server root (Netlify,
+          // Capacitor) and under a subpath (GitHub Pages project sites).
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
       workbox: {
-        navigateFallback: '/index.html',
+        // Base-aware so offline fallback works under a subpath (GitHub Pages).
+        // VITE_BASE may or may not carry a trailing slash — normalize it.
+        navigateFallback: `${(process.env.VITE_BASE || '').replace(/\/+$/, '')}/index.html`,
         // The pdf.js worker is a multi-MB .mjs that's now loaded lazily via a
         // dynamic import — excluding it from the precache manifest is what keeps
         // the build (and the generated SW) fast.

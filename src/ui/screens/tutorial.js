@@ -1,4 +1,5 @@
 import { loadSettings, saveSettings, listAccounts, getActiveAccountId, setActiveAccount, listDocs } from '../../lib/storage.js'
+import { assetUrl } from '../../lib/assets.js'
 
 // ── Static screenshot tutorial ──
 // A swipeable slide deck showing real screenshots of the app with glowing
@@ -7,7 +8,7 @@ import { loadSettings, saveSettings, listAccounts, getActiveAccountId, setActive
 const SLIDES = [
   {
     screen: 'library-empty',
-    img: '/wizard/slides/slide-1-library-empty.jpg',
+    img: assetUrl('wizard/slides/slide-1-library-empty.jpg'),
     mp3: 'tut-library-empty',
     portrait: 'tut-add',
     title: 'Your Library',
@@ -18,7 +19,7 @@ const SLIDES = [
   },
   {
     screen: 'library-tour',
-    img: '/wizard/slides/slide-2-library-tour.jpg',
+    img: assetUrl('wizard/slides/slide-2-library-tour.jpg'),
     mp3: 'tut-library-tour',
     portrait: 'tut-add',
     title: 'Your Library',
@@ -28,7 +29,7 @@ const SLIDES = [
   },
   {
     screen: 'import',
-    img: '/wizard/slides/slide-3-import.jpg',
+    img: assetUrl('wizard/slides/slide-3-import.jpg'),
     mp3: 'tut-import',
     portrait: 'tut-import',
     title: 'Add a Document',
@@ -38,7 +39,7 @@ const SLIDES = [
   },
   {
     screen: 'setup',
-    img: '/wizard/slides/slide-4-setup.jpg',
+    img: assetUrl('wizard/slides/slide-4-setup.jpg'),
     mp3: 'tut-setup',
     portrait: 'tut-setup',
     title: 'Quiz Setup',
@@ -48,7 +49,7 @@ const SLIDES = [
   },
   {
     screen: 'quiz-first',
-    img: '/wizard/slides/slide-5-quiz-first.jpg',
+    img: assetUrl('wizard/slides/slide-5-quiz-first.jpg'),
     mp3: 'tut-quiz-first',
     portrait: 'tut-quiz',
     title: 'Answer Questions',
@@ -58,7 +59,7 @@ const SLIDES = [
   },
   {
     screen: 'quiz-correct',
-    img: '/wizard/slides/slide-6-quiz-correct.jpg',
+    img: assetUrl('wizard/slides/slide-6-quiz-correct.jpg'),
     mp3: 'tut-quiz-correct',
     portrait: 'tut-correct',
     title: 'Correct!',
@@ -68,7 +69,7 @@ const SLIDES = [
   },
   {
     screen: 'quiz-wrong',
-    img: '/wizard/slides/slide-7-quiz-wrong.jpg',
+    img: assetUrl('wizard/slides/slide-7-quiz-wrong.jpg'),
     mp3: 'tut-quiz-wrong',
     portrait: 'tut-wrong',
     title: 'Not Quite',
@@ -78,7 +79,7 @@ const SLIDES = [
   },
   {
     screen: 'progress',
-    img: '/wizard/slides/slide-8-progress.jpg',
+    img: assetUrl('wizard/slides/slide-8-progress.jpg'),
     mp3: 'tut-progress-first',
     portrait: 'tut-progress',
     title: 'Your Progress',
@@ -88,7 +89,7 @@ const SLIDES = [
   },
   {
     screen: 'quiz-done',
-    img: '/wizard/slides/slide-9-quiz-done.jpg',
+    img: assetUrl('wizard/slides/slide-9-quiz-done.jpg'),
     mp3: 'tut-quiz-done',
     portrait: 'tut-done',
     title: 'All Done!',
@@ -110,7 +111,7 @@ function cacheAudio(name) {
   if (audioCache.has(name)) return
   const a = new Audio()
   a.preload = 'auto'
-  a.src = `/wizard/${name}.mp3`
+  a.src = assetUrl(`wizard/${name}.mp3`)
   a.load()
   audioCache.set(name, a)
 }
@@ -146,7 +147,7 @@ function playAudio(name) {
   const cached = audioCache.get(name)
   if (!audioEl) { audioEl = new Audio(); audioEl.preload = 'auto' }
   try {
-    audioEl.src = cached ? cached.src : `/wizard/${name}.mp3`
+    audioEl.src = cached ? cached.src : assetUrl(`wizard/${name}.mp3`)
     audioEl.volume = 1
     audioEl.muted = false
     const p = audioEl.play()
@@ -211,7 +212,7 @@ export function render(root, ctx) {
               </div>
               <div class="tut-copy">
                 <div class="tut-portrait">
-                  <img class="tut-wiz" src="/wizard/${s.portrait}.jpg" alt="" decoding="async" />
+                  <img class="tut-wiz" src="${assetUrl(`wizard/${s.portrait}.jpg`)}" alt="" decoding="async" />
                   <div class="tut-portrait-glow"></div>
                 </div>
                 <div class="tut-text">
